@@ -1,0 +1,27 @@
+{
+  "name": "botcrmf5",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon --quiet app.js",
+    "botstart": "node bot/botCore.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@slack/bolt": "^4.4.0",
+    "@slack/web-api": "^7.9.3",
+    "body-parser": "^2.2.0",
+    "date-fns": "^4.1.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "mssql": "^11.0.1"
+  },
+  "devDependencies": {
+    "ngrok": "^5.0.0-beta.2",
+    "nodemon": "^3.1.10"
+  }
+}
