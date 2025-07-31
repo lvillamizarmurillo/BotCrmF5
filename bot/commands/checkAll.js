@@ -1,8 +1,11 @@
 const { pool, poolConnect } = require('../../db/conection.js');
 const { WebClient } = require('@slack/web-api');
 const sql = require('mssql');
-const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays } = require('date-fns');
+const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays, subMonths, startOfMonth, endOfMonth } = require('date-fns');
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
+
+// Lista de funcionarios autorizados para ejecutar este comando
+const FUNCIONARIOS_AUTORIZADOS = ['LUDWINGV', 'KARLAC', '10', '11', '8'];
 
 /**
  * Servicio para manejar operaciones relacionadas con usuarios
@@ -66,6 +69,15 @@ class ServicioUsuario {
         tipoDescanso: funcionario.TipoDescanso,
         username: funcionario.FunDirEmail // Asumimos que FunDirEmail contiene el username de Slack
       }));
+  }
+
+  /**
+   * Verifica si un funcionario está autorizado para ejecutar el comando
+   * @param {string} funCod - Código del funcionario
+   * @returns {boolean} True si está autorizado, false si no
+   */
+  static tienePermisosAdministrador(funCod) {
+    return FUNCIONARIOS_AUTORIZADOS.includes(funCod);
   }
 }
 
@@ -235,7 +247,7 @@ class ConstructorMensajesSlack {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `📅 Reporte Mensual - ${format(fechaInicio, 'MMMM yyyy')}`
+        text: `📅 Reporte Mensual - ${format(fechaInicio, 'MMMM yyyy')} (Mes Anterior)`
       }
     });
     
@@ -362,12 +374,31 @@ class ConstructorMensajesSlack {
       }
     ];
   }
+
+  static construirMensajeSinPermisos() {
+    return [
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '⛔ *Acceso denegado*'
+        }
+      },
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: 'No tienes permisos para ejecutar este comando de administrador.\n\nPor favor, contacta al servicio técnico si necesitas acceso.'
+        }
+      }
+    ];
+  }
 }
 
 /**
  * Comando para generar reportes mensuales masivos
  */
-class ComandoReporteMensualMasivo {
+class ComandoReporteMensualMasivoPast {
   /**
    * Ejecuta el comando para generar reportes masivos
    * @param {Object} comando - Objeto con el comando de Slack
@@ -377,14 +408,45 @@ class ComandoReporteMensualMasivo {
     try {
       const userId = comando.user_id;
 
+      // 0. Verificar permisos del usuario que ejecuta el comando
+      // Obtener información del usuario de Slack
+      const usuarioSlack = await slackClient.users.info({ user: userId });
+      if (!usuarioSlack.ok || !usuarioSlack.user) {
+        throw new Error('No se pudo obtener información del usuario de Slack');
+      }
+      
+      // Buscar el FunCod del usuario en la base de datos usando su username de Slack (FunDirEmail)
+      await poolConnect;
+      const resultado = await pool.request()
+        .input('username', sql.VarChar, usuarioSlack.user.name)
+        .query(`
+          SELECT FunCod FROM Funcionarios 
+          WHERE FunEst = 'A' AND FunDirEmail = @username
+        `);
+
+      if (resultado.recordset.length === 0) {
+        return await say({
+          blocks: ConstructorMensajesSlack.construirMensajeSinPermisos()
+        });
+      }
+
+      const funCodUsuario = resultado.recordset[0].FunCod;
+      
+      // Verificar si el usuario está autorizado
+      if (!FUNCIONARIOS_AUTORIZADOS.includes(funCodUsuario)) {
+        return await say({
+          blocks: ConstructorMensajesSlack.construirMensajeSinPermisos()
+        });
+      }
+
       // 1. Obtener todos los funcionarios activos
       const funcionarios = await ServicioUsuario.obtenerTodosFuncionariosActivos();
 
-      // 2. Configurar fechas del reporte
+      // 2. Configurar fechas del reporte (mes anterior completo)
       const hoy = new Date();
-      const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-      const ayer = subDays(hoy, 1);
-      const festivos = ServicioFechas.obtenerFestivosColombia(hoy.getFullYear());
+      const primerDiaMesAnterior = startOfMonth(subMonths(hoy, 1));
+      const ultimoDiaMesAnterior = endOfMonth(subMonths(hoy, 1));
+      const festivos = ServicioFechas.obtenerFestivosColombia(primerDiaMesAnterior.getFullYear());
 
       // 3. Enviar confirmación de inicio
       await say({
@@ -394,11 +456,16 @@ class ComandoReporteMensualMasivo {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `⏳ *Iniciando envío masivo de reportes mensuales*\nSe enviarán reportes a ${funcionarios.length} funcionarios activos`
+              text: `⏳ *Iniciando envío masivo de reportes mensuales*\nSe enviarán reportes del mes anterior (${format(primerDiaMesAnterior, 'MMMM yyyy')}) a ${funcionarios.length} funcionarios activos`
             }
           }
         ]
       });
+
+      // Contadores para el resumen final
+      let usuariosProcesados = 0;
+      let usuariosConPendientes = 0;
+      let usuariosAlDia = 0;
 
       // 4. Procesar cada funcionario
       for (const funcionario of funcionarios) {
@@ -413,51 +480,67 @@ class ComandoReporteMensualMasivo {
           const nombreUsuario = userInfo.real_name || userInfo.name || 'Usuario';
           const userId = userInfo.id;
 
-          // 4.2 Obtener días laborables del mes
+          // 4.2 Obtener días laborables del mes anterior completo
           const diasLaborables = ServicioFechas.obtenerDiasLaborables(
-            primerDiaMes, 
-            ayer, 
+            primerDiaMesAnterior, 
+            ultimoDiaMesAnterior, 
             funcionario.tipoDescanso, 
             festivos
           );
 
-          // 4.3 Contar días excluidos
+          // 4.3 Contar días excluidos (sábados y festivos del mes anterior)
           const sabadosExcluidos = eachDayOfInterval({
-            start: primerDiaMes,
-            end: ayer
+            start: primerDiaMesAnterior,
+            end: ultimoDiaMesAnterior
           }).filter(dia => 
             getDay(dia) === 6 && ServicioFechas.esSabadoDescanso(dia, funcionario.tipoDescanso)
           ).length;
 
           const festivosExcluidos = festivos.filter(f => {
             const fechaFestivo = new Date(f);
-            return fechaFestivo >= primerDiaMes && fechaFestivo <= ayer;
+            return fechaFestivo >= primerDiaMesAnterior && fechaFestivo <= ultimoDiaMesAnterior;
           }).length;
 
-          // 4.4 Generar reporte diario
+          // 4.4 Generar reporte diario para todos los días laborables del mes anterior
           const reportesDiarios = [];
+          let tienePendientes = false;
+          
           for (const dia of diasLaborables) {
             const reporte = await ServicioReporteTiempo.obtenerReporteDiario(funcionario.funCod, dia);
             reportesDiarios.push(reporte);
+            
+            // Verificar si este día tiene pendientes
+            if (!reporte.cumpleRequerimiento) {
+              tienePendientes = true;
+            }
           }
 
-          // 4.5 Dividir en semanas
+          // 4.5 Si el usuario está al día (sin pendientes), saltar al siguiente
+          if (!tienePendientes) {
+            console.log(`✅ Usuario ${nombreUsuario} (${funcionario.funCod}) está al día, no se enviará reporte`);
+            usuariosAlDia++;
+            continue;
+          }
+
+          usuariosConPendientes++;
+
+          // 4.6 Dividir en semanas
           const semanas = ServicioFechas.agruparPorSemanas(reportesDiarios);
           
-          // 4.6 Calcular resumen mensual
+          // 4.7 Calcular resumen mensual
           const resumenMensual = ServicioReporteTiempo.calcularResumenMensual(
             reportesDiarios, 
             sabadosExcluidos, 
             festivosExcluidos
           );
 
-          // 4.7 Construir y enviar mensaje completo
+          // 4.8 Construir y enviar mensaje completo
           const bloquesMensaje = ConstructorMensajesSlack.construirMensajeCompleto(
             nombreUsuario,
             funcionario.funCod,
             funcionario.tipoDescanso,
-            primerDiaMes,
-            ayer,
+            primerDiaMesAnterior,
+            ultimoDiaMesAnterior,
             sabadosExcluidos,
             festivosExcluidos,
             semanas,
@@ -466,9 +549,11 @@ class ComandoReporteMensualMasivo {
 
           await slackClient.chat.postMessage({
             channel: userId,
-            text: `Reporte mensual completo para ${nombreUsuario}`,
+            text: `Reporte mensual completo para ${nombreUsuario} (${format(primerDiaMesAnterior, 'MMMM yyyy')})`,
             blocks: bloquesMensaje
           });
+
+          usuariosProcesados++;
 
         } catch (error) {
           console.error(`🚨 Error procesando funcionario ${funcionario.funCod}:`, error);
@@ -484,8 +569,22 @@ class ComandoReporteMensualMasivo {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '✅ *Envío masivo de reportes completado*\nSe han procesado todos los funcionarios activos'
+              text: `✅ *Envío masivo de reportes completado*`
             }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: `*Total funcionarios:* ${funcionarios.length}\n*Procesados:* ${usuariosProcesados}\n*Al día:* ${usuariosAlDia}\n*Con pendientes:* ${usuariosConPendientes}`
+            }
+          },
+          {
+            type: 'context',
+            elements: [{
+              type: 'mrkdwn',
+              text: `Solo se enviaron reportes a usuarios con horas pendientes por registrar del mes ${format(primerDiaMesAnterior, 'MMMM yyyy')}`
+            }]
           }
         ]
       });
@@ -500,4 +599,4 @@ class ComandoReporteMensualMasivo {
   }
 }
 
-module.exports = ComandoReporteMensualMasivo;
+module.exports = ComandoReporteMensualMasivoPast;
