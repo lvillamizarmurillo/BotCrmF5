@@ -1,7 +1,7 @@
 const { pool, poolConnect } = require('../../db/conection.js');
 const { WebClient } = require('@slack/web-api');
 const sql = require('mssql');
-const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays, subMonths, startOfMonth, endOfMonth } = require('date-fns');
+const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays, startOfMonth, endOfMonth } = require('date-fns');
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 // Lista de funcionarios autorizados para ejecutar este comando
@@ -247,7 +247,7 @@ class ConstructorMensajesSlack {
       type: 'header',
       text: {
         type: 'plain_text',
-        text: `📅 Reporte Mensual - ${format(fechaInicio, 'MMMM yyyy')} (Mes Anterior)`
+        text: `📅 Reporte Mensual - ${format(fechaInicio, 'MMMM yyyy')} (Hasta ${format(fechaFin, 'dd/MM/yyyy')})`
       }
     });
     
@@ -396,9 +396,9 @@ class ConstructorMensajesSlack {
 }
 
 /**
- * Comando para generar reportes mensuales masivos
+ * Comando para generar reportes mensuales masivos del mes actual hasta ayer
  */
-class ComandoReporteMensualMasivoPast {
+class ComandoReporteMensualMasivoActual {
   /**
    * Ejecuta el comando para generar reportes masivos
    * @param {Object} comando - Objeto con el comando de Slack
@@ -433,7 +433,7 @@ class ComandoReporteMensualMasivoPast {
       const funCodUsuario = resultado.recordset[0].FunCod;
       
       // Verificar si el usuario está autorizado
-      if (!FUNCIONARIOS_AUTORIZADOS.includes(funCodUsuario)) {
+      if (!ServicioUsuario.tienePermisosAdministrador(funCodUsuario)) {
         return await say({
           blocks: ConstructorMensajesSlack.construirMensajeSinPermisos()
         });
@@ -442,11 +442,11 @@ class ComandoReporteMensualMasivoPast {
       // 1. Obtener todos los funcionarios activos
       const funcionarios = await ServicioUsuario.obtenerTodosFuncionariosActivos();
 
-      // 2. Configurar fechas del reporte (mes anterior completo)
+      // 2. Configurar fechas del reporte (mes actual hasta ayer)
       const hoy = new Date();
-      const primerDiaMesAnterior = startOfMonth(subMonths(hoy, 1));
-      const ultimoDiaMesAnterior = endOfMonth(subMonths(hoy, 1));
-      const festivos = ServicioFechas.obtenerFestivosColombia(primerDiaMesAnterior.getFullYear());
+      const primerDiaMesActual = startOfMonth(hoy);
+      const ayer = subDays(hoy, 1);
+      const festivos = ServicioFechas.obtenerFestivosColombia(hoy.getFullYear());
 
       // 3. Enviar confirmación de inicio
       await say({
@@ -456,7 +456,7 @@ class ComandoReporteMensualMasivoPast {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: `⏳ *Iniciando envío masivo de reportes mensuales*\nSe enviarán reportes del mes anterior (${format(primerDiaMesAnterior, 'MMMM yyyy')}) a ${funcionarios.length} funcionarios activos`
+              text: `⏳ *Iniciando envío masivo de reportes mensuales*\nSe enviarán reportes del mes actual (${format(primerDiaMesActual, 'MMMM yyyy')} hasta ${format(ayer, 'dd/MM/yyyy')} a ${funcionarios.length} funcionarios activos`
             }
           }
         ]
@@ -480,28 +480,28 @@ class ComandoReporteMensualMasivoPast {
           const nombreUsuario = userInfo.real_name || userInfo.name || 'Usuario';
           const userId = userInfo.id;
 
-          // 4.2 Obtener días laborables del mes anterior completo
+          // 4.2 Obtener días laborables del mes actual hasta ayer
           const diasLaborables = ServicioFechas.obtenerDiasLaborables(
-            primerDiaMesAnterior, 
-            ultimoDiaMesAnterior, 
+            primerDiaMesActual, 
+            ayer, 
             funcionario.tipoDescanso, 
             festivos
           );
 
-          // 4.3 Contar días excluidos (sábados y festivos del mes anterior)
+          // 4.3 Contar días excluidos (sábados y festivos del mes actual hasta ayer)
           const sabadosExcluidos = eachDayOfInterval({
-            start: primerDiaMesAnterior,
-            end: ultimoDiaMesAnterior
+            start: primerDiaMesActual,
+            end: ayer
           }).filter(dia => 
             getDay(dia) === 6 && ServicioFechas.esSabadoDescanso(dia, funcionario.tipoDescanso)
           ).length;
 
           const festivosExcluidos = festivos.filter(f => {
             const fechaFestivo = new Date(f);
-            return fechaFestivo >= primerDiaMesAnterior && fechaFestivo <= ultimoDiaMesAnterior;
+            return fechaFestivo >= primerDiaMesActual && fechaFestivo <= ayer;
           }).length;
 
-          // 4.4 Generar reporte diario para todos los días laborables del mes anterior
+          // 4.4 Generar reporte diario para todos los días laborables del mes actual hasta ayer
           const reportesDiarios = [];
           let tienePendientes = false;
           
@@ -539,8 +539,8 @@ class ComandoReporteMensualMasivoPast {
             nombreUsuario,
             funcionario.funCod,
             funcionario.tipoDescanso,
-            primerDiaMesAnterior,
-            ultimoDiaMesAnterior,
+            primerDiaMesActual,
+            ayer,
             sabadosExcluidos,
             festivosExcluidos,
             semanas,
@@ -549,7 +549,7 @@ class ComandoReporteMensualMasivoPast {
 
           await slackClient.chat.postMessage({
             channel: userId,
-            text: `Reporte mensual completo para ${nombreUsuario} (${format(primerDiaMesAnterior, 'MMMM yyyy')})`,
+            text: `Reporte mensual completo para ${nombreUsuario} (${format(primerDiaMesActual, 'MMMM yyyy')} hasta ${format(ayer, 'dd/MM/yyyy')})`,
             blocks: bloquesMensaje
           });
 
@@ -583,7 +583,7 @@ class ComandoReporteMensualMasivoPast {
             type: 'context',
             elements: [{
               type: 'mrkdwn',
-              text: `Solo se enviaron reportes a usuarios con horas pendientes por registrar del mes ${format(primerDiaMesAnterior, 'MMMM yyyy')}`
+              text: `Solo se enviaron reportes a usuarios con horas pendientes por registrar del mes ${format(primerDiaMesActual, 'MMMM yyyy')} hasta ${format(ayer, 'dd/MM/yyyy')}`
             }]
           }
         ]
@@ -599,4 +599,4 @@ class ComandoReporteMensualMasivoPast {
   }
 }
 
-module.exports = ComandoReporteMensualMasivoPast;
+module.exports = ComandoReporteMensualMasivoActual;
