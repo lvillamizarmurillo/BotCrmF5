@@ -1,7 +1,7 @@
 const { pool, poolConnect } = require('../../db/conection.js');
 const { WebClient } = require('@slack/web-api');
 const sql = require('mssql');
-const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays, subMonths, lastDayOfMonth } = require('date-fns');
+const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays, subMonths, lastDayOfMonth, getWeek } = require('date-fns');
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 class ServicioUsuario {
@@ -65,11 +65,17 @@ class ServicioFechas {
   }
 
   static esSabadoDescanso(fecha, tipoDescanso) {
+    // No procesar si no es sábado.
     if (getDay(fecha) !== 6) return false;
-    const diaDelMes = fecha.getDate();
-    const semanaDelMes = Math.ceil(diaDelMes / 7);
-    //return (tipoDescanso === 1 && semanaDelMes % 2 === 1) || (tipoDescanso === 2 && semanaDelMes % 2 === 0);
-    return (tipoDescanso === 1 && semanaDelMes % 2 === 0) || (tipoDescanso === 2 && semanaDelMes % 2 === 1);
+
+    // Se obtiene el número de la semana del año. 
+    // { weekStartsOn: 1 } asegura que la semana empiece en Lunes, para consistencia.
+    const semanaDelAño = getWeek(fecha, { weekStartsOn: 1 });
+    
+    // El tipo 1 descansa en semanas IMPARES del año.
+    // El tipo 2 descansa en semanas PARES del año.
+    // Este método es robusto y no se "invierte" entre meses.
+    return (tipoDescanso === 1 && semanaDelAño % 2 === 1) || (tipoDescanso === 2 && semanaDelAño % 2 === 0);
   }
 
   static agruparPorSemanas(dias) {
