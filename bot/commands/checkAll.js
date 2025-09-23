@@ -18,18 +18,13 @@ class ServicioUsuario {
    */
   static async obtenerInformacionUsuarioPorUsername(username) {
     try {
-      // Primero obtenemos todos los usuarios
       const respuesta = await slackClient.users.list();
-      
       if (!respuesta.ok || !respuesta.members) {
         throw new Error('No se pudo obtener la lista de usuarios de Slack');
       }
-
-      // Buscamos el usuario por su nombre (name)
       const usuario = respuesta.members.find(member => 
-        member.name === username.toLowerCase() // Normalizamos a minúsculas para comparar
+        member.name === username.toLowerCase()
       );
-
       return usuario || null;
     } catch (error) {
       console.error(`Error al obtener info del usuario con username ${username}:`, error);
@@ -47,15 +42,11 @@ class ServicioUsuario {
       .query(`
         SELECT FunCod, TipoDescanso, FunDirEmail 
         FROM Funcionarios 
-        WHERE FunEst = 'A' 
-        AND FunDirEmail IS NOT NULL
+        WHERE FunEst = 'A' AND FunDirEmail IS NOT NULL
       `);
-
     if (resultado.recordset.length === 0) {
       throw new Error('No se encontraron funcionarios activos con username registrado');
     }
-
-    // Filtrar y mapear los resultados
     return resultado.recordset
       .filter(funcionario => {
         if (funcionario.TipoDescanso !== 1 && funcionario.TipoDescanso !== 2) {
@@ -67,7 +58,7 @@ class ServicioUsuario {
       .map(funcionario => ({
         funCod: funcionario.FunCod,
         tipoDescanso: funcionario.TipoDescanso,
-        username: funcionario.FunDirEmail // Asumimos que FunDirEmail contiene el username de Slack
+        username: funcionario.FunDirEmail
       }));
   }
 
@@ -105,36 +96,21 @@ class ServicioFechas {
   static esSabadoDescanso(fecha, tipoDescanso) {
     if (getDay(fecha) !== 6) return false;
     const semanaDelMes = Math.ceil(fecha.getDate() / 7);
-    return (tipoDescanso === 1 && semanaDelMes % 2 === 1) || (tipoDescanso === 2 && semanaDelMes % 2 === 0);
+    return (tipoDescanso === 1 && semanaDelMes % 2 === 0) || (tipoDescanso === 2 && semanaDelMes % 2 === 1);
   }
 
   static agruparPorSemanas(dias) {
-    if (dias.length === 0) {
-      return [];
-    }
-    
-    // Un Map para agrupar los días. La clave será el string de la fecha de inicio de semana.
+    if (dias.length === 0) return [];
     const semanasAgrupadas = new Map();
-
     dias.forEach(dia => {
-      // Obtenemos el Lunes de la semana a la que pertenece el día. { weekStartsOn: 1 } define Lunes como inicio.
       const inicioDeSemana = startOfWeek(dia.fechaObj, { weekStartsOn: 1 });
       const inicioDeSemanaStr = format(inicioDeSemana, 'yyyy-MM-dd');
-
-      // Si no tenemos una entrada para esta semana, la creamos.
       if (!semanasAgrupadas.has(inicioDeSemanaStr)) {
         semanasAgrupadas.set(inicioDeSemanaStr, []);
       }
-      
-      // Añadimos el día al array de su semana correspondiente.
       semanasAgrupadas.get(inicioDeSemanaStr).push(dia);
     });
-
-    // Convertimos el Map en un array de semanas y lo ordenamos para asegurar el orden cronológico.
-    const semanasOrdenadas = Array.from(semanasAgrupadas.values()).sort((semanaA, semanaB) => {
-        return semanaA[0].fechaObj - semanaB[0].fechaObj;
-    });
-    return semanasOrdenadas;
+    return Array.from(semanasAgrupadas.values()).sort((semanaA, semanaB) => semanaA[0].fechaObj - semanaB[0].fechaObj);
   }
 }
 
@@ -159,24 +135,19 @@ class ServicioReporteTiempo {
       `);
 
     const { TotalHoras, TotalMinutos } = resultado.recordset[0];
-    let horasRegistradas = 0;
-    let minutosRegistrados = 0;
-    let mensaje = '';
-    let cumpleRequerimiento = false;
-    let faltante = '';
+    let horasRegistradas = 0, minutosRegistrados = 0, mensaje = '', cumpleRequerimiento = false, faltante = '';
 
     if (TotalHoras !== null && TotalMinutos !== null) {
       horasRegistradas = TotalHoras + Math.floor(TotalMinutos / 60);
       minutosRegistrados = TotalMinutos % 60;
       const totalHorasDecimal = horasRegistradas + (minutosRegistrados / 60);
-      cumpleRequerimiento = totalHorasDecimal >= horasRequeridas;
+      cumpleRequerimiento = totalHorasDecimal >= horasRequeridas; // >= Correcto para el día
       
       if (!cumpleRequerimiento) {
         const horasFaltantes = Math.floor(horasRequeridas - totalHorasDecimal);
         const minutosFaltantes = Math.round((horasRequeridas - totalHorasDecimal - horasFaltantes) * 60);
         faltante = ` - *Faltan ${horasFaltantes}h ${minutosFaltantes}m*`;
       }
-
       mensaje = `*${horasRegistradas}h ${minutosRegistrados.toString().padStart(2, '0')}m*${faltante}`;
     } else {
       const horasFaltantes = Math.floor(horasRequeridas);
@@ -184,16 +155,7 @@ class ServicioReporteTiempo {
       faltante = ` - *Faltan ${horasFaltantes}h ${minutosFaltantes}m*`;
       mensaje = `*Sin registro*${faltante}`;
     }
-
-    return {
-      fecha: format(fecha, 'dd/MM/yyyy'),
-      fechaObj: fecha,
-      mensaje: mensaje,
-      horas: horasRegistradas,
-      minutos: minutosRegistrados,
-      cumpleRequerimiento: cumpleRequerimiento,
-      esSabado: esSabado
-    };
+    return { fecha: format(fecha, 'dd/MM/yyyy'), fechaObj: fecha, mensaje, horas: horasRegistradas, minutos: minutosRegistrados, cumpleRequerimiento, esSabado };
   }
 
   static calcularResumenSemanal(diasSemana) {
@@ -201,37 +163,20 @@ class ServicioReporteTiempo {
     const totalMinutos = diasSemana.reduce((sum, dia) => sum + dia.minutos, 0);
     const horasFormateadas = totalHoras + Math.floor(totalMinutos / 60);
     const minutosFormateados = totalMinutos % 60;
-
     const diasLaborales = diasSemana.filter(dia => !dia.esSabado).length;
     const sabadosLaborables = diasSemana.filter(dia => dia.esSabado).length;
-    
-    // Convertir horas requeridas a formato hh:mm (8.5 horas = 8:30)
-    const horasRequeridasLaborales = diasLaborales * 8.5;
-    const horasRequeridasSabados = sabadosLaborables * 3;
-    const totalHorasRequeridas = horasRequeridasLaborales + horasRequeridasSabados;
-    
-    // Separar en horas y minutos
+    const totalHorasRequeridas = (diasLaborales * 8.5) + (sabadosLaborables * 3);
     const horasRequeridasEntero = Math.floor(totalHorasRequeridas);
     const minutosRequeridos = Math.round((totalHorasRequeridas - horasRequeridasEntero) * 60);
-    
     const totalHorasDecimal = horasFormateadas + (minutosFormateados / 60);
+    // ✅ La lógica clave está aquí: >= se asegura que "más horas" también cuente como cumplido
     const cumpleRequerimiento = totalHorasDecimal >= totalHorasRequeridas;
-
-    return {
-      totalHoras: horasFormateadas,
-      totalMinutos: minutosFormateados,
-      horasRequeridas: `${horasRequeridasEntero}h ${minutosRequeridos.toString().padStart(2, '0')}m`,
-      cumpleRequerimiento: cumpleRequerimiento
-    };
+    return { totalHoras: horasFormateadas, totalMinutos: minutosFormateados, horasRequeridas: `${horasRequeridasEntero}h ${minutosRequeridos.toString().padStart(2, '0')}m`, cumpleRequerimiento };
   }
 
   static calcularResumenMensual(diasReporte, sabadosExcluidos, festivosExcluidos) {
     const resumenSemanal = this.calcularResumenSemanal(diasReporte);
-    return {
-      ...resumenSemanal,
-      sabadosExcluidos,
-      festivosExcluidos
-    };
+    return { ...resumenSemanal, sabadosExcluidos, festivosExcluidos };
   }
 }
 
@@ -241,236 +186,77 @@ class ServicioReporteTiempo {
 class ConstructorMensajesSlack {
   static construirMensajeCompleto(nombreUsuario, funCod, tipoDescanso, fechaInicio, fechaFin, sabadosExcluidos, festivosExcluidos, semanas, resumenMensual) {
     const bloques = [];
-    
-    // 1. Encabezado e información inicial
-    bloques.push({
-      type: 'header',
-      text: {
-        type: 'plain_text',
-        text: `📅 Reporte Mensual - ${format(fechaInicio, 'MMMM yyyy')} (Hasta ${format(fechaFin, 'dd/MM/yyyy')})`
-      }
-    });
-    
-    bloques.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*Usuario:* ${nombreUsuario} (${funCod})\n*Tipo Descanso:* ${tipoDescanso}\n*Período:* ${format(fechaInicio, 'dd/MM/yyyy')} - ${format(fechaFin, 'dd/MM/yyyy')}\n*Sábados excluidos:* ${sabadosExcluidos}\n*Festivos excluidos:* ${festivosExcluidos}`
-      }
-    });
-    
+    bloques.push({ type: 'header', text: { type: 'plain_text', text: `📅 Reporte Mensual - ${format(fechaInicio, 'MMMM yyyy')} (Hasta ${format(fechaFin, 'dd/MM/yyyy')})` } });
+    bloques.push({ type: 'section', text: { type: 'mrkdwn', text: `*Usuario:* ${nombreUsuario} (${funCod})\n*Tipo Descanso:* ${tipoDescanso}\n*Período:* ${format(fechaInicio, 'dd/MM/yyyy')} - ${format(fechaFin, 'dd/MM/yyyy')}\n*Sábados excluidos:* ${sabadosExcluidos}\n*Festivos excluidos:* ${festivosExcluidos}` } });
     bloques.push({ type: 'divider' });
-    
-    // 2. Secciones por semana
     for (const [indice, semana] of semanas.entries()) {
       const numeroSemana = indice + 1;
       const primeraFecha = semana[0].fechaObj;
       const ultimaFecha = semana[semana.length - 1].fechaObj;
       const resumenSemana = ServicioReporteTiempo.calcularResumenSemanal(semana);
       const esUltimaSemana = indice === semanas.length - 1;
-      
-      // Encabezado semana
-      bloques.push({
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: `📆 Semana ${numeroSemana} (${format(primeraFecha, 'dd/MM')} - ${format(ultimaFecha, 'dd/MM')})`
-        }
-      });
-      
-      // Días laborales
+      bloques.push({ type: 'header', text: { type: 'plain_text', text: `📆 Semana ${numeroSemana} (${format(primeraFecha, 'dd/MM')} - ${format(ultimaFecha, 'dd/MM')})` } });
       const diasLaborales = semana.filter(dia => !dia.esSabado);
       if (diasLaborales.length > 0) {
-        bloques.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: '*📝 Días laborales (L-V) - Requerido: 8h 30m*'
-          }
-        });
-
+        bloques.push({ type: 'section', text: { type: 'mrkdwn', text: '*📝 Días laborales (L-V) - Requerido: 8h 30m*' } });
         for (let i = 0; i < diasLaborales.length; i += 2) {
-          const campos = diasLaborales.slice(i, i + 2).map(dia => ({
-            type: 'mrkdwn',
-            text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}`
-          }));
-          
+          const campos = diasLaborales.slice(i, i + 2).map(dia => ({ type: 'mrkdwn', text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}` }));
           while (campos.length < 2) campos.push({ type: 'mrkdwn', text: ' ' });
           bloques.push({ type: 'section', fields: campos });
         }
       }
-      
-      // Sábados
       const sabados = semana.filter(dia => dia.esSabado);
       if (sabados.length > 0) {
-        bloques.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: '*🛠️ Sábados laborables - Requerido: 3h*'
-          }
-        });
-
+        bloques.push({ type: 'section', text: { type: 'mrkdwn', text: '*🛠️ Sábados laborables - Requerido: 3h*' } });
         sabados.forEach(dia => {
-          bloques.push({
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}`
-            }
-          });
+          bloques.push({ type: 'section', text: { type: 'mrkdwn', text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}` } });
         });
       }
-      
-      // Resumen semana - Solo si no es la última semana
       if (!esUltimaSemana) {
-        bloques.push({
-          type: 'context',
-          elements: [{
-            type: 'mrkdwn',
-            text: `*📊 Total semana ${numeroSemana}:* ${resumenSemana.totalHoras}h ${resumenSemana.totalMinutos.toString().padStart(2, '0')}m (Requerido: ${resumenSemana.horasRequeridas}) ${resumenSemana.cumpleRequerimiento ? '✅' : '⚠️'}`
-          }]
-        });
+        bloques.push({ type: 'context', elements: [{ type: 'mrkdwn', text: `*📊 Total semana ${numeroSemana}:* ${resumenSemana.totalHoras}h ${resumenSemana.totalMinutos.toString().padStart(2, '0')}m (Requerido: ${resumenSemana.horasRequeridas}) ${resumenSemana.cumpleRequerimiento ? '✅' : '⚠️'}` }] });
       }
-      
       bloques.push({ type: 'divider' });
     }
-    
-    // 3. Resumen mensual
-    bloques.push({
-      type: 'header',
-      text: {
-        type: 'plain_text',
-        text: '📊 Resumen Mensual'
-      }
-    });
-    
-    bloques.push({
-      type: 'section',
-      text: {
-        type: 'mrkdwn',
-        text: `*TOTAL MENSUAL:* ${resumenMensual.totalHoras}h ${resumenMensual.totalMinutos.toString().padStart(2, '0')}m ${resumenMensual.cumpleRequerimiento ? '✅' : '⚠️'}\n*Requerido:* ${resumenMensual.horasRequeridas}\n*Sábados excluidos:* ${resumenMensual.sabadosExcluidos}\n*Festivos excluidos:* ${resumenMensual.festivosExcluidos}`
-      }
-    });
-    
+    bloques.push({ type: 'header', text: { type: 'plain_text', text: '📊 Resumen Mensual' } });
+    bloques.push({ type: 'section', text: { type: 'mrkdwn', text: `*TOTAL MENSUAL:* ${resumenMensual.totalHoras}h ${resumenMensual.totalMinutos.toString().padStart(2, '0')}m ${resumenMensual.cumpleRequerimiento ? '✅' : '⚠️'}\n*Requerido:* ${resumenMensual.horasRequeridas}\n*Sábados excluidos:* ${resumenMensual.sabadosExcluidos}\n*Festivos excluidos:* ${resumenMensual.festivosExcluidos}` } });
     return bloques;
   }
-
-  static construirMensajeError(error) {
-    return [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '❌ *Error al generar el reporte mensual*'
-        }
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Detalles:*\n${error.message}`
-        }
-      }
-    ];
-  }
-
-  static construirMensajeSinPermisos() {
-    return [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '⛔ *Acceso denegado*'
-        }
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: 'No tienes permisos para ejecutar este comando de administrador.\n\nPor favor, contacta al servicio técnico si necesitas acceso.'
-        }
-      }
-    ];
-  }
+  static construirMensajeError(error) { return [{ type: 'section', text: { type: 'mrkdwn', text: '❌ *Error al generar el reporte mensual*' } }, { type: 'section', text: { type: 'mrkdwn', text: `*Detalles:*\n${error.message}` } }]; }
+  static construirMensajeSinPermisos() { return [{ type: 'section', text: { type: 'mrkdwn', text: '⛔ *Acceso denegado*' } }, { type: 'section', text: { type: 'mrkdwn', text: 'No tienes permisos para ejecutar este comando de administrador.\n\nPor favor, contacta al servicio técnico si necesitas acceso.' } }]; }
 }
 
 /**
  * Comando para generar reportes mensuales masivos del mes actual hasta ayer
  */
 class ComandoReporteMensualMasivoActual {
-  /**
-   * Ejecuta el comando para generar reportes masivos
-   * @param {Object} comando - Objeto con el comando de Slack
-   * @param {Function} say - Función para enviar mensajes a Slack
-   */
   async execute(comando, say) {
     try {
       const userId = comando.user_id;
-
-      // 0. Verificar permisos del usuario que ejecuta el comando
-      // Obtener información del usuario de Slack
       const usuarioSlack = await slackClient.users.info({ user: userId });
-      if (!usuarioSlack.ok || !usuarioSlack.user) {
-        throw new Error('No se pudo obtener información del usuario de Slack');
-      }
+      if (!usuarioSlack.ok || !usuarioSlack.user) { throw new Error('No se pudo obtener información del usuario de Slack'); }
       
-      // Buscar el FunCod del usuario en la base de datos usando su username de Slack (FunDirEmail)
       await poolConnect;
       const resultado = await pool.request()
         .input('username', sql.VarChar, usuarioSlack.user.name)
-        .query(`
-          SELECT FunCod FROM Funcionarios 
-          WHERE FunEst = 'A' AND FunDirEmail = @username
-        `);
-
-      if (resultado.recordset.length === 0) {
-        return await say({
-          blocks: ConstructorMensajesSlack.construirMensajeSinPermisos()
-        });
-      }
-
-      const funCodUsuario = resultado.recordset[0].FunCod;
+        .query(`SELECT FunCod FROM Funcionarios WHERE FunEst = 'A' AND FunDirEmail = @username`);
       
-      // Verificar si el usuario está autorizado
-      if (!ServicioUsuario.tienePermisosAdministrador(funCodUsuario)) {
-        return await say({
-          blocks: ConstructorMensajesSlack.construirMensajeSinPermisos()
-        });
+      if (resultado.recordset.length === 0 || !ServicioUsuario.tienePermisosAdministrador(resultado.recordset[0].FunCod)) {
+        return await say({ blocks: ConstructorMensajesSlack.construirMensajeSinPermisos() });
       }
 
-      // 1. Obtener todos los funcionarios activos
       const funcionarios = await ServicioUsuario.obtenerTodosFuncionariosActivos();
-
-      // 2. Configurar fechas del reporte (mes actual hasta ayer)
       const hoy = new Date();
       const primerDiaMesActual = startOfMonth(hoy);
       const ayer = subDays(hoy, 1);
       const festivos = ServicioFechas.obtenerFestivosColombia(hoy.getFullYear());
 
-      // 3. Enviar confirmación de inicio
-      await say({
-        text: `Iniciando envío masivo de reportes a ${funcionarios.length} funcionarios`,
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `⏳ *Iniciando envío masivo de reportes mensuales*\nSe enviarán reportes del mes actual (${format(primerDiaMesActual, 'MMMM yyyy')} hasta ${format(ayer, 'dd/MM/yyyy')} a ${funcionarios.length} funcionarios activos`
-            }
-          }
-        ]
-      });
+      await say({ text: `Iniciando envío masivo de reportes a ${funcionarios.length} funcionarios`, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `⏳ *Iniciando envío masivo de reportes mensuales*\nSe enviarán reportes del mes actual (${format(primerDiaMesActual, 'MMMM yyyy')} hasta ${format(ayer, 'dd/MM/yyyy')}) a ${funcionarios.length} funcionarios activos` } }] });
 
-      // Contadores para el resumen final
-      let usuariosProcesados = 0;
-      let usuariosConPendientes = 0;
-      let usuariosAlDia = 0;
+      let usuariosConPendientes = 0, usuariosAlDia = 0;
+      const listaUsuariosAlDia = [], listaUsuariosConPendientes = [];
 
-      // 4. Procesar cada funcionario
       for (const funcionario of funcionarios) {
         try {
-          // 4.1 Obtener información del usuario en Slack por username
           const userInfo = await ServicioUsuario.obtenerInformacionUsuarioPorUsername(funcionario.username);
           if (!userInfo) {
             console.warn(`⚠️ No se encontró usuario en Slack con username: ${funcionario.username}`);
@@ -479,122 +265,75 @@ class ComandoReporteMensualMasivoActual {
 
           const nombreUsuario = userInfo.real_name || userInfo.name || 'Usuario';
           const userId = userInfo.id;
-
-          // 4.2 Obtener días laborables del mes actual hasta ayer
-          const diasLaborables = ServicioFechas.obtenerDiasLaborables(
-            primerDiaMesActual, 
-            ayer, 
-            funcionario.tipoDescanso, 
-            festivos
-          );
-
-          // 4.3 Contar días excluidos (sábados y festivos del mes actual hasta ayer)
-          const sabadosExcluidos = eachDayOfInterval({
-            start: primerDiaMesActual,
-            end: ayer
-          }).filter(dia => 
-            getDay(dia) === 6 && ServicioFechas.esSabadoDescanso(dia, funcionario.tipoDescanso)
-          ).length;
-
-          const festivosExcluidos = festivos.filter(f => {
-            const fechaFestivo = new Date(f);
-            return fechaFestivo >= primerDiaMesActual && fechaFestivo <= ayer;
-          }).length;
-
-          // 4.4 Generar reporte diario para todos los días laborables del mes actual hasta ayer
-          const reportesDiarios = [];
-          let tienePendientes = false;
+          const diasLaborables = ServicioFechas.obtenerDiasLaborables(primerDiaMesActual, ayer, funcionario.tipoDescanso, festivos);
           
+          // 1. Acumulamos todos los reportes diarios sin tomar decisiones aún
+          const reportesDiarios = [];
           for (const dia of diasLaborables) {
             const reporte = await ServicioReporteTiempo.obtenerReporteDiario(funcionario.funCod, dia);
             reportesDiarios.push(reporte);
-            
-            // Verificar si este día tiene pendientes
-            if (!reporte.cumpleRequerimiento) {
-              tienePendientes = true;
-            }
           }
 
-          // 4.5 Si el usuario está al día (sin pendientes), saltar al siguiente
-          if (!tienePendientes) {
-            console.log(`✅ Usuario ${nombreUsuario} (${funcionario.funCod}) está al día, no se enviará reporte`);
+          // 2. Calculamos el resumen total del mes
+          const sabadosExcluidos = eachDayOfInterval({ start: primerDiaMesActual, end: ayer }).filter(dia => getDay(dia) === 6 && ServicioFechas.esSabadoDescanso(dia, funcionario.tipoDescanso)).length;
+          const festivosExcluidos = festivos.filter(f => { const fechaFestivo = new Date(f); return fechaFestivo >= primerDiaMesActual && fechaFestivo <= ayer; }).length;
+          const resumenMensual = ServicioReporteTiempo.calcularResumenMensual(reportesDiarios, sabadosExcluidos, festivosExcluidos);
+
+          // 3. ✅ TOMAMOS LA DECISIÓN BASADOS EN EL TOTAL DEL MES
+          if (resumenMensual.cumpleRequerimiento) {
+            // Si cumplió (horas >= requeridas), está al día. Pasamos al siguiente.
+            console.log(`✅ Usuario ${nombreUsuario} (${funcionario.funCod}) está al día.`);
             usuariosAlDia++;
+            listaUsuariosAlDia.push(nombreUsuario);
             continue;
           }
-
-          usuariosConPendientes++;
-
-          // 4.6 Dividir en semanas
-          const semanas = ServicioFechas.agruparPorSemanas(reportesDiarios);
           
-          // 4.7 Calcular resumen mensual
-          const resumenMensual = ServicioReporteTiempo.calcularResumenMensual(
-            reportesDiarios, 
-            sabadosExcluidos, 
-            festivosExcluidos
+          // 4. Si el código llega hasta aquí, significa que no cumplió.
+          usuariosConPendientes++;
+          listaUsuariosConPendientes.push(
+            `*${nombreUsuario}*: ${resumenMensual.totalHoras}h ${String(resumenMensual.totalMinutos).padStart(2, '0')}m de ${resumenMensual.horasRequeridas}`
           );
 
-          // 4.8 Construir y enviar mensaje completo
-          const bloquesMensaje = ConstructorMensajesSlack.construirMensajeCompleto(
-            nombreUsuario,
-            funcionario.funCod,
-            funcionario.tipoDescanso,
-            primerDiaMesActual,
-            ayer,
-            sabadosExcluidos,
-            festivosExcluidos,
-            semanas,
-            resumenMensual
-          );
-
-          await slackClient.chat.postMessage({
-            channel: userId,
-            text: `Reporte mensual completo para ${nombreUsuario} (${format(primerDiaMesActual, 'MMMM yyyy')} hasta ${format(ayer, 'dd/MM/yyyy')})`,
-            blocks: bloquesMensaje
-          });
-
-          usuariosProcesados++;
+          // Procedemos a construir y enviar el mensaje detallado
+          const semanas = ServicioFechas.agruparPorSemanas(reportesDiarios);
+          const bloquesMensaje = ConstructorMensajesSlack.construirMensajeCompleto(nombreUsuario, funcionario.funCod, funcionario.tipoDescanso, primerDiaMesActual, ayer, sabadosExcluidos, festivosExcluidos, semanas, resumenMensual);
+          await slackClient.chat.postMessage({ channel: userId, text: `Reporte mensual completo para ${nombreUsuario}`, blocks: bloquesMensaje });
 
         } catch (error) {
           console.error(`🚨 Error procesando funcionario ${funcionario.funCod}:`, error);
-          // Continuar con el siguiente funcionario aunque falle uno
         }
       }
 
-      // 5. Enviar resumen de ejecución
-      await say({
-        text: 'Envío masivo de reportes completado',
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `✅ *Envío masivo de reportes completado*`
-            }
-          },
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: `*Total funcionarios:* ${funcionarios.length}\n*Procesados:* ${usuariosProcesados}\n*Al día:* ${usuariosAlDia}\n*Con pendientes:* ${usuariosConPendientes}`
-            }
-          },
-          {
-            type: 'context',
-            elements: [{
-              type: 'mrkdwn',
-              text: `Solo se enviaron reportes a usuarios con horas pendientes por registrar del mes ${format(primerDiaMesActual, 'MMMM yyyy')} hasta ${format(ayer, 'dd/MM/yyyy')}`
-            }]
-          }
-        ]
+      const bloquesResumenFinal = [
+        { type: 'section', text: { type: 'mrkdwn', text: `✅ *Envío masivo de reportes completado*` } },
+        { type: 'section', text: { type: 'mrkdwn', text: `*Total de funcionarios revisados:* ${funcionarios.length}\n*Reportes enviados (con pendientes):* ${usuariosConPendientes}\n*Funcionarios al día (sin reporte):* ${usuariosAlDia}` } },
+        { type: 'divider' }
+      ];
+
+      if (listaUsuariosConPendientes.length > 0) {
+        bloquesResumenFinal.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: `⚠️ *Funcionarios con horas pendientes (${listaUsuariosConPendientes.length}):*\n` + listaUsuariosConPendientes.join('\n') }
+        });
+      }
+
+      if (listaUsuariosAlDia.length > 0) {
+        bloquesResumenFinal.push({
+          type: 'section',
+          text: { type: 'mrkdwn', text: `✅ *Funcionarios al día (${listaUsuariosAlDia.length}):*\n` + listaUsuariosAlDia.join('\n') }
+        });
+      }
+      
+      bloquesResumenFinal.push({
+        type: 'context',
+        elements: [{ type: 'mrkdwn', text: `Se enviaron reportes detallados solo a los usuarios con horas pendientes.` }]
       });
+
+      await say({ text: 'Resumen del envío masivo de reportes', blocks: bloquesResumenFinal });
 
     } catch (error) {
       console.error('🚨 Error en comando masivo:', error);
-      await say({
-        text: '❌ Error al ejecutar el comando masivo',
-        blocks: ConstructorMensajesSlack.construirMensajeError(error)
-      });
+      await say({ text: '❌ Error al ejecutar el comando masivo', blocks: ConstructorMensajesSlack.construirMensajeError(error) });
     }
   }
 }

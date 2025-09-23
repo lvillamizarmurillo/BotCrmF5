@@ -76,8 +76,8 @@ class ServicioFechas {
     if (getDay(fecha) !== 6) return false;
     const diaDelMes = fecha.getDate();
     const semanaDelMes = Math.ceil(diaDelMes / 7);
-    return (tipoDescanso === 1 && semanaDelMes % 2 === 1) || 
-           (tipoDescanso === 2 && semanaDelMes % 2 === 0);
+    //return (tipoDescanso === 1 && semanaDelMes % 2 === 1) || (tipoDescanso === 2 && semanaDelMes % 2 === 0);
+    return (tipoDescanso === 1 && semanaDelMes % 2 === 0) || (tipoDescanso === 2 && semanaDelMes % 2 === 1);
   }
 
   static agruparPorSemanas(dias) {
