@@ -1,145 +1,157 @@
-const { pool, poolConnect } = require('../../db/conection.js'); // Ajusta la ruta si es necesario
+const { pool, poolConnect } = require('../../db/conection.js');
 const { WebClient } = require('@slack/web-api');
 const sql = require('mssql');
+
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 /**
- * Servicio para gestionar las notificaciones de tareas pendientes.
- * Contiene toda la lógica de base de datos y envío de mensajes.
+ * 🛠️ SERVICIO SLACK ACTUALIZADO
+ * Ahora busca por nombre de usuario en lugar de email.
  */
-class ServicioNotificaciones {
+class ServicioSlack {
+    /**
+     * Busca un usuario en Slack por su nombre de usuario (ej. 'lvillamizarmurillo').
+     * @param {string} username - El nombre de usuario a buscar.
+     * @returns {Promise<string|null>} El ID del usuario de Slack (ej: 'U123ABC456') o null si no se encuentra.
+     */
+    static async obtenerIdUsuarioPorUsername(username) {
+        if (!username) {
+            console.warn('Se intentó buscar un usuario de Slack sin proporcionar un username.');
+            return null;
+        }
+        try {
+            // 1. Obtenemos la lista de TODOS los usuarios del workspace.
+            // Slack no tiene un método directo para buscar por username, esta es la forma estándar.
+            const respuesta = await slackClient.users.list();
+            
+            if (respuesta.ok && respuesta.members) {
+                // 2. Buscamos en la lista el miembro cuyo 'name' coincida.
+                const usuarioEncontrado = respuesta.members.find(
+                    miembro => miembro.name === username.toLowerCase()
+                );
 
-  /**
-   * Obtiene los códigos de funcionarios con tareas pendientes de notificar.
-   * @returns {Promise<Array<number>>} Una lista de IDs de funcionarios (SubFunCodTar).
-   */
-  static async obtenerFuncionariosPorNotificar() {
-    await poolConnect;
-    try {
-      const resultado = await pool.request().query(`
-        SELECT DISTINCT SubFunCodTar 
-        FROM Tareas 
-        WHERE TarNot = 'N' OR TarNot IS NULL
-      `);
-      
-      if (resultado.recordset.length === 0) {
-        console.log('ℹ️ No hay tareas pendientes de notificar.');
-        return [];
-      }
-
-      // Devolvemos un array plano de IDs: [10, 25, 30]
-      return resultado.recordset.map(r => r.SubFunCodTar);
-
-    } catch (error) {
-      console.error('Error al obtener funcionarios con tareas pendientes:', error);
-      throw new Error('No se pudieron consultar las tareas pendientes.');
+                if (usuarioEncontrado) {
+                    // 3. Si lo encontramos, devolvemos su ID.
+                    return usuarioEncontrado.id;
+                }
+            }
+            // Si no se encuentra el usuario o la respuesta de la API falla.
+            console.log(`No se encontró un usuario en Slack con el username: ${username}`);
+            return null;
+        } catch (error) {
+            console.error(`Error al listar o buscar usuarios de Slack por username (${username}):`, error);
+            return null;
+        }
     }
-  }
-
-  /**
-   * Busca los emails (ID de Slack) de una lista de funcionarios.
-   * @param {Array<number>} idsFuncionarios - Lista de FunCod.
-   * @returns {Promise<Array<string>>} Una lista de emails/IDs de Slack.
-   */
-  static async obtenerEmailsDeFuncionarios(idsFuncionarios) {
-    if (idsFuncionarios.length === 0) return [];
-    
-    await poolConnect;
-    try {
-      const request = pool.request();
-      // Creamos los parámetros dinámicamente para evitar inyección SQL
-      const params = idsFuncionarios.map((id, index) => `@id${index}`).join(',');
-      idsFuncionarios.forEach((id, index) => {
-        request.input(`id${index}`, sql.Int, id);
-      });
-
-      const resultado = await request.query(`
-        SELECT FunDirEmail 
-        FROM Funcionarios 
-        WHERE FunCod IN (${params}) AND FunEst = 'A' AND FunDirEmail IS NOT NULL
-      `);
-      
-      // Devolvemos un array plano de emails, filtrando los nulos por si acaso
-      return resultado.recordset.map(r => r.FunDirEmail).filter(Boolean);
-
-    } catch (error) {
-      console.error('Error al obtener emails de funcionarios:', error);
-      throw new Error('No se pudieron obtener los datos de los funcionarios.');
-    }
-  }
-
-  /**
-   * Marca las tareas como notificadas para una lista de funcionarios.
-   * @param {Array<number>} idsFuncionarios - Lista de FunCod a quienes se les notificó.
-   */
-  static async marcarTareasComoNotificadas(idsFuncionarios) {
-    if (idsFuncionarios.length === 0) return;
-    
-    await poolConnect;
-    try {
-        const request = pool.request();
-        const params = idsFuncionarios.map((id, index) => `@id${index}`).join(',');
-        idsFuncionarios.forEach((id, index) => {
-            request.input(`id${index}`, sql.Int, id);
-        });
-
-      const resultado = await request.query(`
-        UPDATE Tareas 
-        SET TarNot = 'S' 
-        WHERE SubFunCodTar IN (${params}) AND (TarNot = 'N' OR TarNot IS NULL)
-      `);
-      
-      console.log(`✅ ${resultado.rowsAffected[0]} tareas actualizadas a 'S'.`);
-
-    } catch (error) {
-      console.error('Error al actualizar el estado de las tareas:', error);
-      // No lanzamos error para no detener el flujo si los mensajes ya se enviaron.
-      // Pero sí es importante registrarlo.
-    }
-  }
 }
 
 /**
- * Comando para orquestar el proceso de notificación de tareas.
+ * Servicio para gestionar la lógica de base de datos (SIN CAMBIOS).
  */
-class ComandoNotificarTareas {
-  /**
-   * Ejecuta el flujo completo de notificación.
-   */
-  async execute() {
-    // 1. Obtener los IDs de funcionarios con tareas pendientes
-    const idsFuncionarios = await ServicioNotificaciones.obtenerFuncionariosPorNotificar();
-    if (idsFuncionarios.length === 0) {
-      return 'No hay usuarios para notificar.';
+class ServicioNotificaciones {
+    static async obtenerTareaPorId(tarSec) {
+        await poolConnect;
+        try {
+            const resultado = await pool.request()
+                .input('TarSec', sql.Int, tarSec)
+                .query('SELECT TarSec, TarDes, FunCod, SubFunCodTar FROM Tareas WHERE TarSec = @TarSec');
+            if (resultado.recordset.length === 0) {
+                console.warn(`⚠️ No se encontró la tarea con TarSec: ${tarSec}`);
+                return null;
+            }
+            return resultado.recordset[0];
+        } catch (error) {
+            console.error('Error al obtener la tarea por ID:', error);
+            throw new Error('No se pudo consultar la tarea específica.');
+        }
     }
 
-    // 2. Obtener los emails/IDs de Slack de esos funcionarios
-    const emailsSlack = await ServicioNotificaciones.obtenerEmailsDeFuncionarios(idsFuncionarios);
-    if (emailsSlack.length === 0) {
-        console.log('⚠️ Se encontraron tareas pendientes, pero no se hallaron los emails de Slack correspondientes.');
-        // Aun así, marcamos las tareas para no volver a procesarlas
-        await ServicioNotificaciones.marcarTareasComoNotificadas(idsFuncionarios);
-        return 'No se encontraron usuarios de Slack válidos para los funcionarios con tareas pendientes.';
+    static async obtenerUsernameDeFuncionario(funCod) { // Cambiado nombre para claridad
+        if (!funCod) return null;
+        await poolConnect;
+        try {
+            const resultado = await pool.request()
+                .input('FunCod', sql.VarChar, funCod)
+                .query(`SELECT FunDirEmail FROM Funcionarios WHERE FunCod = @FunCod AND FunEst = 'A' AND FunDirEmail IS NOT NULL`);
+            return resultado.recordset.length > 0 ? resultado.recordset[0].FunDirEmail : null;
+        } catch (error) {
+            console.error('Error al obtener username del funcionario:', error);
+            throw new Error('No se pudo obtener el username del funcionario.');
+        }
     }
-    
-    // 3. Enviar mensaje a cada usuario
-    const mensaje = "👋 ¡Hola! Tienes una tarea nueva pendiente en el CRM. Por favor, recarga la página y revísala en la sección de 'Notificaciones' o en la pantalla 'wptareas'.";
-    
-    const promesasEnvio = emailsSlack.map(email => {
-      return slackClient.chat.postMessage({
-        channel: email, // Enviar a DM usando el ID de usuario (que es el email en tu caso)
-        text: mensaje
-      }).catch(err => console.error(`Error enviando mensaje a ${email}: ${err.data.error}`));
-    });
 
-    await Promise.all(promesasEnvio);
-    console.log(`🚀 Mensajes enviados a ${emailsSlack.length} usuarios.`);
-
-    // 4. Actualizar la base de datos para no volver a notificar
-    await ServicioNotificaciones.marcarTareasComoNotificadas(idsFuncionarios);
-
-    return `Proceso de notificación finalizado para ${idsFuncionarios.length} funcionarios.`;
-  }
+    static async obtenerNombreDeFuncionario(funCod) {
+        if (!funCod) return 'Un usuario';
+        await poolConnect;
+        try {
+            const resultado = await pool.request()
+                .input('FunCod', sql.VarChar, funCod)
+                .query('SELECT FunNom FROM Funcionarios WHERE FunCod = @FunCod');
+            return resultado.recordset.length > 0 ? resultado.recordset[0].FunNom.trim() : 'Un usuario';
+        } catch (error) {
+            console.error(`Error al obtener el nombre del funcionario ${funCod}:`, error);
+            return 'Un usuario';
+        }
+    }
 }
 
-module.exports = ComandoNotificarTareas;
+
+/**
+ * Orquesta la notificación de UNA tarea específica (LÓGICA ACTUALIZADA).
+ */
+class NotifyTasksFunction {
+    async execute(vaDirigidoA, tarSec) {
+        const tarea = await ServicioNotificaciones.obtenerTareaPorId(tarSec);
+        if (!tarea) {
+            throw new Error(`La tarea con ID ${tarSec} no existe.`);
+        }
+
+        let targetFunCod = null;
+        let mensaje = "";
+
+        if (vaDirigidoA === 'NotificarAsignado') {
+            targetFunCod = tarea.SubFunCodTar;
+            const nombreCreador = await ServicioNotificaciones.obtenerNombreDeFuncionario(tarea.FunCod);
+            mensaje = `👋 ¡Hola! *${nombreCreador}* te asignó la tarea con ID *${tarSec}*. Por favor, revísala en el sistema.`;
+        } else if (vaDirigidoA === 'NotificarCreador') {
+            targetFunCod = tarea.FunCod;
+            const nombreAsignado = await ServicioNotificaciones.obtenerNombreDeFuncionario(tarea.SubFunCodTar);
+            mensaje = `👍 ¡Buenas noticias! *${nombreAsignado}* finalizó la tarea con ID *${tarSec}*. Ya puedes verificarla.`;
+        } else {
+            throw new Error(`El parámetro 'vaDirigidoA' ("${vaDirigidoA}") no es válido.`);
+        }
+
+        if (!targetFunCod) {
+            return `La tarea ${tarSec} no tiene un destinatario válido para la acción '${vaDirigidoA}'.`;
+        }
+        
+        // CAMBIO 1: Obtenemos el username de la BD. Le cambié el nombre a la función y variable para que sea más claro.
+        const usernameSlack = await ServicioNotificaciones.obtenerUsernameDeFuncionario(targetFunCod);
+        if (!usernameSlack) {
+            console.warn(`⚠️ No se encontró un username de Slack en la BD para el funcionario ${targetFunCod}.`);
+            return `No se encontró el username de Slack para el funcionario ${targetFunCod}.`;
+        }
+
+        // CAMBIO 2: Usamos el nuevo método para buscar por username.
+        const slackUserId = await ServicioSlack.obtenerIdUsuarioPorUsername(usernameSlack);
+        if (!slackUserId) {
+            console.warn(`⚠️ No se encontró un usuario en Slack con el username ${usernameSlack} (del Funcionario: ${targetFunCod}).`);
+            return `No se encontró el usuario de Slack correspondiente al funcionario ${targetFunCod}.`;
+        }
+        
+        // CAMBIO 3: El envío del mensaje ahora funcionará porque `slackUserId` es el ID correcto.
+        try {
+            await slackClient.chat.postMessage({
+                channel: slackUserId,
+                text: mensaje
+            });
+        } catch(err) {
+            console.error(`Error al enviar mensaje a ${slackUserId}: ${err.data ? err.data.error : err.message}`);
+            throw new Error(`No se pudo enviar el mensaje de Slack al usuario ${slackUserId}.`);
+        }
+        
+        return `Notificación para la tarea ${tarSec} enviada correctamente a ${targetFunCod}.`;
+    }
+}
+
+module.exports = NotifyTasksFunction;

@@ -6,7 +6,6 @@ const CheckMePastCommand = require('./commands/checkMePast');
 const CheckCommands = require('./commands/checkCommands');
 const CheckMyProfile = require('./commands/checkMyProfile');
 const NotifyTasksFunction = require('./functions/notifyTasks');
-const NotifyCompletionFunction = require('./functions/notifyCompletion');
 require('dotenv').config();
 
 // PASO 1: Crear instancia del ExpressReceiver
@@ -21,52 +20,27 @@ const bot = new App({
 });
 
 // PASO 3: Configurar el endpoint para GeneXus usando receiver.app
-receiver.app.post('/api/notificar-tareas', async (req, res) => {
-  console.log('✅ Petición recibida desde GeneXus para notificar tareas.');
-  
-  try {
-    const handler = new NotifyTasksFunction();
-    const resultado = await handler.execute(); // Ejecutamos la lógica de notificación
+receiver.app.post('/api/notificar-tareas/:vaDirigidoA/:TarSec', async (req, res) => {
 
-    // Respondemos a GeneXus que todo salió bien
-    res.status(200).json({ 
-        status: 'ok', 
-        message: resultado 
-    });
+    const { vaDirigidoA, TarSec } = req.params;
 
-  } catch (error) {
-    console.error('❌ Error en el proceso de notificación de tareas:', error);
-    // Informamos a GeneXus del error
-    res.status(500).json({ 
-        status: 'error', 
-        message: 'Ocurrió un error interno al procesar las notificaciones.',
-        detail: error.message
-    });
-  }
-});
+    try {
+        const handler = new NotifyTasksFunction(); 
+        const resultado = await handler.execute(vaDirigidoA, TarSec); 
 
-receiver.app.post('/api/notificar-finalizacion/:tarSec', async (req, res) => {
-  const { tarSec } = req.params; // Capturamos el TarSec desde la URL
-  console.log(`✅ Petición recibida desde GeneXus para notificar finalización de tarea: ${tarSec}.`);
+        // Respondes a GeneXus que todo salió bien
+        res.status(200).json({
+            status: 'ok',
+            message: resultado
+        });
 
-  try {
-    // Pasamos el tarSec al constructor de nuestra nueva clase
-    const handler = new NotifyCompletionFunction(tarSec);
-    const resultado = await handler.execute();
-
-    res.status(200).json({ 
-        status: 'ok', 
-        message: resultado 
-    });
-
-  } catch (error) {
-    console.error(`❌ Error en el proceso de notificación para Tarea ${tarSec}:`, error);
-    res.status(500).json({ 
-        status: 'error', 
-        message: 'Ocurrió un error interno al procesar la notificación.',
-        detail: error.message
-    });
-  }
+    } catch (error) {
+        console.error('❌ Error en el proceso de notificación de tarea:', error);
+        res.status(500).json({
+            status: 'error',
+            message: error.message || 'Ocurrió un error interno al procesar la notificación.',
+        });
+    }
 });
 
 // Mapeo de comandos
