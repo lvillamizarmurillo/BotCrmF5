@@ -1,20 +1,28 @@
-const { pool, poolConnect } = require('../../db/conection.js');
-const { WebClient } = require('@slack/web-api');
-const sql = require('mssql');
-const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, getWeek, addDays, subMonths, startOfMonth, endOfMonth } = require('date-fns');
+// Importaciones de módulos y librerías necesarias.
+const { pool, poolConnect } = require('../../db/conection.js'); // Conexión a la base de datos.
+const { WebClient } = require('@slack/web-api'); // Cliente de la API de Slack.
+const sql = require('mssql'); // Driver de SQL Server.
+const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, getWeek, addDays, subMonths, startOfMonth, endOfMonth } = require('date-fns'); // Librería para manipulación de fechas.
+
+// Inicialización del cliente de Slack.
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
-// Lista de funcionarios autorizados para ejecutar este comando
+/**
+ * @constant {string[]} FUNCIONARIOS_AUTORIZADOS
+ * @description Lista de códigos de funcionarios con permisos de administrador para este comando.
+ */
 const FUNCIONARIOS_AUTORIZADOS = ['LUDWINGV', 'KARLAC', '10', '11', '8'];
 
 /**
- * Servicio para manejar operaciones relacionadas con usuarios
+ * @class ServicioUsuario
+ * @description Encapsula la lógica para interactuar con la información de los usuarios.
+ * Es idéntico al de `checkAll.js`, demostrando una oportunidad de refactorización para evitar duplicación.
  */
 class ServicioUsuario {
   /**
-   * Obtiene información del usuario desde Slack usando su username
-   * @param {string} username - Nombre de usuario en Slack (name)
-   * @returns {Promise<Object|null>} Información del usuario o null si no se encuentra
+   * Obtiene información de un usuario de Slack por su `username`.
+   * @param {string} username - El `name` del usuario en Slack.
+   * @returns {Promise<Object|null>} El objeto del miembro de Slack o `null`.
    */
   static async obtenerInformacionUsuarioPorUsername(username) {
     try {
@@ -33,8 +41,8 @@ class ServicioUsuario {
   }
 
   /**
-   * Obtiene todos los funcionarios activos con username registrado
-   * @returns {Promise<Array<Object>>} Array de objetos con FunCod, TipoDescanso y username
+   * Obtiene todos los funcionarios activos de la base de datos con un email registrado.
+   * @returns {Promise<Array<Object>>} Un array de objetos de funcionario.
    */
   static async obtenerTodosFuncionariosActivos() {
     await poolConnect;
@@ -63,9 +71,9 @@ class ServicioUsuario {
   }
 
   /**
-   * Verifica si un funcionario está autorizado para ejecutar el comando
-   * @param {string} funCod - Código del funcionario
-   * @returns {boolean} True si está autorizado, false si no
+   * Verifica si un funcionario tiene permisos de administrador.
+   * @param {string} funCod - El código del funcionario.
+   * @returns {boolean} `true` si está autorizado.
    */
   static tienePermisosAdministrador(funCod) {
     return FUNCIONARIOS_AUTORIZADOS.includes(funCod);
@@ -73,7 +81,9 @@ class ServicioUsuario {
 }
 
 /**
- * Servicio para manejar operaciones con fechas
+ * @class ServicioFechas
+ * @description Agrupa métodos para la manipulación de fechas.
+ * Idéntico a `checkAll.js`, candidato a ser un módulo reutilizable.
  */
 class ServicioFechas {
   static obtenerFestivosColombia(año) {
@@ -94,16 +104,9 @@ class ServicioFechas {
   }
 
   static esSabadoDescanso(fecha, tipoDescanso) {
-    // No procesar si no es sábado.
     if (getDay(fecha) !== 6) return false;
-
-    // Se obtiene el número de la semana del año. 
-    // { weekStartsOn: 1 } asegura que la semana empiece en Lunes, para consistencia.
     const semanaDelAño = getWeek(fecha, { weekStartsOn: 1 });
-
-    // El tipo 1 descansa en semanas IMPARES del año.
-    // El tipo 2 descansa en semanas PARES del año.
-    return (tipoDescanso === 1 && semanaDelAño % 2 === 1) || (tipoDescanso === 2 && semanaDelAño % 2 === 0);
+    return (tipoDescanso === 1 && semanaDelAño % 2 !== 0) || (tipoDescanso === 2 && semanaDelAño % 2 === 0);
   }
 
   static agruparPorSemanas(dias) {
@@ -122,7 +125,9 @@ class ServicioFechas {
 }
 
 /**
- * Servicio para generar reportes de tiempo
+ * @class ServicioReporteTiempo
+ * @description Contiene la lógica para consultar y calcular los tiempos registrados.
+ * Idéntico a `checkAll.js`, candidato a ser un módulo reutilizable.
  */
 class ServicioReporteTiempo {
   static async obtenerReporteDiario(funCod, fecha) {
@@ -187,7 +192,9 @@ class ServicioReporteTiempo {
 }
 
 /**
- * Constructor de mensajes para Slack
+ * @class ConstructorMensajesSlack
+ * @description Construye los bloques de mensajes de Slack para los reportes.
+ * Idéntico a `checkAll.js`, ideal para refactorizar.
  */
 class ConstructorMensajesSlack {
   static construirMensajeCompleto(nombreUsuario, funCod, tipoDescanso, fechaInicio, fechaFin, sabadosExcluidos, festivosExcluidos, semanas, resumenMensual) {
@@ -233,12 +240,19 @@ class ConstructorMensajesSlack {
 
 
 /**
- * Comando para generar reportes mensuales masivos del mes anterior
+ * @class ComandoReporteMensualMasivoPast
+ * @description Orquesta la ejecución del comando `crm-check-all-admin-past`,
+ * que genera y envía reportes masivos del mes anterior completo.
  */
 class ComandoReporteMensualMasivoPast {
+  /**
+   * Método principal que se ejecuta al invocar el comando.
+   * @param {Object} comando - Objeto del comando de Slack.
+   * @param {Function} say - Función para enviar mensajes a Slack.
+   */
   async execute(comando, say) {
     try {
-      // Verificar permisos del usuario que ejecuta el comando
+      // 1. Verificar permisos del administrador que ejecuta el comando.
       const userId = comando.user_id;
       const usuarioSlack = await slackClient.users.info({ user: userId });
       if (!usuarioSlack.ok || !usuarioSlack.user) { throw new Error('No se pudo obtener información del usuario de Slack'); }
@@ -252,23 +266,22 @@ class ComandoReporteMensualMasivoPast {
         return await say({ blocks: ConstructorMensajesSlack.construirMensajeSinPermisos() });
       }
 
-      // 1. Obtener todos los funcionarios activos
+      // 2. Obtener lista de todos los funcionarios activos.
       const funcionarios = await ServicioUsuario.obtenerTodosFuncionariosActivos();
       
-      // 2. Configurar fechas para el reporte (mes anterior completo)
+      // 3. Configurar fechas para el reporte: mes anterior completo.
       const hoy = new Date();
       const primerDiaMesAnterior = startOfMonth(subMonths(hoy, 1));
       const ultimoDiaMesAnterior = endOfMonth(subMonths(hoy, 1));
       const festivos = ServicioFechas.obtenerFestivosColombia(primerDiaMesAnterior.getFullYear());
 
-      // 3. Enviar mensaje de inicio del proceso
+      // 4. Enviar mensaje de inicio del proceso al administrador.
       await say({ text: `Iniciando envío masivo de reportes a ${funcionarios.length} funcionarios`, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: `⏳ *Iniciando envío masivo de reportes mensuales*\nSe enviarán reportes del mes anterior (${format(primerDiaMesAnterior, 'MMMM yyyy')}) a ${funcionarios.length} funcionarios activos` } }] });
 
-      // 4. Inicializar contadores y listas para el resumen final
       let usuariosConPendientes = 0, usuariosAlDia = 0;
       const listaUsuariosAlDia = [], listaUsuariosConPendientes = [];
 
-      // 5. Procesar cada funcionario
+      // 5. Procesar cada funcionario.
       for (const funcionario of funcionarios) {
         try {
           const userInfo = await ServicioUsuario.obtenerInformacionUsuarioPorUsername(funcionario.username);
@@ -281,34 +294,31 @@ class ComandoReporteMensualMasivoPast {
           const userChannelId = userInfo.id;
           const diasLaborables = ServicioFechas.obtenerDiasLaborables(primerDiaMesAnterior, ultimoDiaMesAnterior, funcionario.tipoDescanso, festivos);
           
-          // 5.1. Acumular todos los reportes diarios del mes sin tomar decisiones aún
           const reportesDiarios = [];
           for (const dia of diasLaborables) {
             const reporte = await ServicioReporteTiempo.obtenerReporteDiario(funcionario.funCod, dia);
             reportesDiarios.push(reporte);
           }
 
-          // 5.2. Calcular el resumen total del mes
           const sabadosExcluidos = eachDayOfInterval({ start: primerDiaMesAnterior, end: ultimoDiaMesAnterior }).filter(dia => getDay(dia) === 6 && ServicioFechas.esSabadoDescanso(dia, funcionario.tipoDescanso)).length;
           const festivosExcluidos = festivos.filter(f => { const fechaFestivo = new Date(f); return fechaFestivo >= primerDiaMesAnterior && fechaFestivo <= ultimoDiaMesAnterior; }).length;
           const resumenMensual = ServicioReporteTiempo.calcularResumenMensual(reportesDiarios, sabadosExcluidos, festivosExcluidos);
 
-          // 5.3. ✅ TOMAR LA DECISIÓN BASADOS EN EL CUMPLIMIENTO DEL TOTAL DEL MES
+          // 6. Decidir si enviar el reporte detallado.
+          // Si el total de horas es igual o mayor al requerido, no se envía nada.
           if (resumenMensual.cumpleRequerimiento) {
-            // Si cumplió (horas >= requeridas), está al día. Se añade a la lista y se pasa al siguiente.
             console.log(`✅ Usuario ${nombreUsuario} (${funcionario.funCod}) está al día.`);
             usuariosAlDia++;
             listaUsuariosAlDia.push(nombreUsuario);
-            continue; // Importante: saltar al siguiente funcionario
+            continue; // Saltar al siguiente funcionario.
           }
           
-          // 5.4. Si el código llega aquí, significa que NO cumplió con el total mensual.
+          // 7. Si no cumple, se construye y envía el mensaje detallado al usuario.
           usuariosConPendientes++;
           listaUsuariosConPendientes.push(
             `*${nombreUsuario}*: ${resumenMensual.totalHoras}h ${String(resumenMensual.totalMinutos).padStart(2, '0')}m de ${resumenMensual.horasRequeridas}`
           );
 
-          // 5.5. Proceder a construir y enviar el mensaje detallado SÓLO si no cumplió
           const semanas = ServicioFechas.agruparPorSemanas(reportesDiarios);
           const bloquesMensaje = ConstructorMensajesSlack.construirMensajeCompleto(nombreUsuario, funcionario.funCod, funcionario.tipoDescanso, primerDiaMesAnterior, ultimoDiaMesAnterior, sabadosExcluidos, festivosExcluidos, semanas, resumenMensual);
           await slackClient.chat.postMessage({ channel: userChannelId, text: `Reporte mensual completo para ${nombreUsuario}`, blocks: bloquesMensaje });
@@ -318,7 +328,7 @@ class ComandoReporteMensualMasivoPast {
         }
       }
 
-      // 6. Construir y enviar el mensaje de resumen final al administrador
+      // 8. Construir y enviar el resumen final al administrador.
       const bloquesResumenFinal = [
         { type: 'section', text: { type: 'mrkdwn', text: `✅ *Envío masivo de reportes completado*` } },
         { type: 'section', text: { type: 'mrkdwn', text: `*Total de funcionarios revisados:* ${funcionarios.length}\n*Reportes enviados (con pendientes):* ${usuariosConPendientes}\n*Funcionarios al día (sin reporte):* ${usuariosAlDia}` } },
@@ -353,4 +363,5 @@ class ComandoReporteMensualMasivoPast {
   }
 }
 
+// Exportar la clase principal para su uso en `botCore.js`.
 module.exports = ComandoReporteMensualMasivoPast;

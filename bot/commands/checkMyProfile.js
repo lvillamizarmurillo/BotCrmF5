@@ -1,16 +1,21 @@
-const { pool, poolConnect } = require('../../db/conection.js');
-const { WebClient } = require('@slack/web-api');
-const sql = require('mssql');
+// Importaciones de módulos necesarios.
+const { pool, poolConnect } = require('../../db/conection.js'); // Conexión a la base de datos.
+const { WebClient } = require('@slack/web-api'); // Cliente de la API de Slack.
+const sql = require('mssql'); // Driver de SQL Server.
+
+// Inicialización del cliente de Slack.
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 /**
- * Servicio para obtener información del perfil del usuario
+ * @class ServicioPerfilUsuario
+ * @description Encapsula la lógica para obtener la información del perfil de un usuario
+ * tanto de Slack como de la base de datos interna.
  */
 class ServicioPerfilUsuario {
   /**
-   * Obtiene información del usuario desde Slack
-   * @param {string} userId - ID del usuario en Slack
-   * @returns {Promise<Object>} Información básica del usuario
+   * Obtiene información básica de un usuario desde la API de Slack usando su ID.
+   * @param {string} userId - El ID del usuario en Slack.
+   * @returns {Promise<Object>} Un objeto con el nombre y el email del usuario.
    */
   static async obtenerInfoSlack(userId) {
     try {
@@ -21,14 +26,16 @@ class ServicioPerfilUsuario {
       };
     } catch (error) {
       console.error('Error obteniendo info de Slack:', error);
+      // Devuelve un objeto por defecto para evitar que la aplicación falle.
       return { nombre: 'Usuario', emailSlack: 'usuario_desconocido' };
     }
   }
 
   /**
-   * Obtiene información detallada del funcionario desde la base de datos
-   * @param {string} email - Email del usuario (usado para buscar en FunDirEmail)
-   * @returns {Promise<Object>} Información completa del funcionario
+   * Obtiene la información detallada de un funcionario desde la base de datos.
+   * La búsqueda se realiza usando el email del usuario, que debe coincidir con `FunDirEmail`.
+   * @param {string} email - El email del funcionario.
+   * @returns {Promise<Object>} Un objeto con la información completa del funcionario.
    */
   static async obtenerInfoFuncionario(email) {
     await poolConnect;
@@ -37,14 +44,8 @@ class ServicioPerfilUsuario {
         .input('email', sql.VarChar(254), email)
         .query(`
           SELECT 
-            f.FunCod, 
-            f.FunNom, 
-            f.FunUsu, 
-            f.FunPass, 
-            f.FunDirEmail,
-            f.FunCc,
-            ta.TrabAreNom,
-            c.CarNom
+            f.FunCod, f.FunNom, f.FunUsu, f.FunPass, f.FunDirEmail,
+            f.FunCc, ta.TrabAreNom, c.CarNom
           FROM 
             Funcionarios f
             LEFT JOIN TrabajoArea ta ON f.TrabAreId = ta.TrabAreId
@@ -61,34 +62,30 @@ class ServicioPerfilUsuario {
       return resultado.recordset[0];
     } catch (error) {
       console.error('Error obteniendo info de funcionario:', error);
-      throw error;
+      throw error; // Propaga el error para ser manejado por el llamador.
     }
   }
 }
 
 /**
- * Constructor de mensajes para el perfil de usuario
+ * @class ConstructorMensajePerfil
+ * @description Clase responsable de construir los bloques de mensajes de Slack
+ * para mostrar el perfil del usuario, separando la presentación de la lógica.
  */
 class ConstructorMensajePerfil {
   /**
-   * Construye el mensaje completo del perfil
-   * @param {Object} infoSlack - Información de Slack
-   * @param {Object} infoFuncionario - Información de la base de datos
-   * @returns {Array} Bloques de mensaje para Slack
+   * Construye el mensaje de perfil completo con la información obtenida.
+   * @param {Object} infoSlack - Información obtenida de Slack.
+   * @param {Object} infoFuncionario - Información obtenida de la base de datos.
+   * @returns {Array<Object>} Un array de bloques de mensaje de Slack.
    */
   static construir(infoSlack, infoFuncionario) {
     return [
       {
         type: 'header',
-        text: {
-          type: 'plain_text',
-          text: '📋 Perfil del Funcionario'
-        }
+        text: { type: 'plain_text', text: '📋 Perfil del Funcionario' }
       },
-      {
-        type: 'divider'
-      },
-      // Sección 1: Código y Nombre
+      { type: 'divider' },
       {
         type: 'section',
         text: {
@@ -98,7 +95,6 @@ class ConstructorMensajePerfil {
                 `👤 *Nombre:* ${infoFuncionario.FunNom || infoSlack.nombre}`
         }
       },
-      // Sección 2: Email y Cédula
       {
         type: 'section',
         text: {
@@ -108,7 +104,6 @@ class ConstructorMensajePerfil {
                 `🪪 *Cédula:* ${infoFuncionario.FunCc || 'Pendiente'}`
         }
       },
-      // Sección 3: Área y Cargo
       {
         type: 'section',
         text: {
@@ -118,18 +113,11 @@ class ConstructorMensajePerfil {
                 `💼 *Cargo:* ${infoFuncionario.CarNom || 'No asignado'}`
         }
       },
-      {
-        type: 'divider'
-      },
-      // Sección 4: Credenciales
+      { type: 'divider' },
       {
         type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*🔑 Credenciales CRM*'
-        }
+        text: { type: 'mrkdwn', text: '*🔑 Credenciales CRM*' }
       },
-      // Sección 5: Usuario y Contraseña
       {
         type: 'section',
         text: {
@@ -143,33 +131,24 @@ class ConstructorMensajePerfil {
   }
 
   /**
-   * Construye mensaje de error
-   * @param {Error} error - Objeto de error
-   * @returns {Array} Bloques de mensaje de error para Slack
+   * Construye un mensaje de error estandarizado.
+   * @param {Error} error - El objeto de error capturado.
+   * @returns {Array<Object>} Bloques de mensaje de error para Slack.
    */
   static construirError(error) {
     return [
       {
         type: 'header',
-        text: {
-          type: 'plain_text',
-          text: '❌ Error al obtener perfil'
-        }
+        text: { type: 'plain_text', text: '❌ Error al obtener perfil' }
       },
       {
         type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Detalles del error:*\n${error.message}`
-        }
+        text: { type: 'mrkdwn', text: `*Detalles del error:*\n${error.message}` }
       },
       {
         type: 'context',
         elements: [
-          {
-            type: 'mrkdwn',
-            text: '🛠️ Consulta intentada sobre las tablas relacionadas: Funcionarios, TrabajoArea y Cargo'
-          }
+          { type: 'mrkdwn', text: '🛠️ Consulta intentada sobre las tablas relacionadas: Funcionarios, TrabajoArea y Cargo' }
         ]
       }
     ];
@@ -177,29 +156,31 @@ class ConstructorMensajePerfil {
 }
 
 /**
- * Comando para mostrar el perfil del usuario
+ * @class ComandoPerfil
+ * @description Clase principal que orquesta la ejecución del comando `unicheck`.
  */
 class ComandoPerfil {
   /**
-   * Ejecuta el comando de perfil
-   * @param {Object} comando - Objeto del comando de Slack
-   * @param {Function} say - Función para enviar mensajes
+   * Ejecuta la lógica para obtener y mostrar el perfil del usuario.
+   * @param {Object} comando - El objeto del comando de Slack.
+   * @param {Function} say - La función para enviar mensajes de vuelta a Slack.
    */
   async execute(comando, say) {
     try {
-      // 1. Obtener información básica del usuario desde Slack
+      // 1. Obtener información básica del usuario desde Slack (nombre, email).
       const infoSlack = await ServicioPerfilUsuario.obtenerInfoSlack(comando.user_id);
       
-      // 2. Obtener información detallada del funcionario desde la BD
+      // 2. Usar el email para obtener la información detallada del funcionario desde la BD.
       const infoFuncionario = await ServicioPerfilUsuario.obtenerInfoFuncionario(infoSlack.emailSlack);
       
-      // 3. Construir y enviar mensaje con la información
+      // 3. Construir y enviar el mensaje de perfil completo.
       await say({
         text: `Perfil de ${infoFuncionario.FunNom || infoSlack.nombre}`,
         blocks: ConstructorMensajePerfil.construir(infoSlack, infoFuncionario)
       });
 
     } catch (error) {
+      // En caso de error, construir y enviar un mensaje de error.
       console.error('Error en comando perfil:', error);
       await say({
         text: 'Error al obtener el perfil',
@@ -209,4 +190,5 @@ class ComandoPerfil {
   }
 }
 
+// Exportar la clase principal para ser usada en `botCore.js`.
 module.exports = ComandoPerfil;

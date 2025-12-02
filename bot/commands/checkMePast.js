@@ -1,10 +1,23 @@
-const { pool, poolConnect } = require('../../db/conection.js');
-const { WebClient } = require('@slack/web-api');
-const sql = require('mssql');
-const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays, subMonths, lastDayOfMonth, getWeek } = require('date-fns');
+// Importaciones de módulos y librerías necesarias.
+const { pool, poolConnect } = require('../../db/conection.js'); // Conexión a la base de datos.
+const { WebClient } = require('@slack/web-api'); // Cliente de la API de Slack.
+const sql = require('mssql'); // Driver de SQL Server.
+const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, endOfWeek, addDays, subMonths, lastDayOfMonth, getWeek } = require('date-fns'); // Librería para manipulación de fechas.
+
+// Inicialización del cliente de Slack.
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
+/**
+ * @class ServicioUsuario
+ * @description Encapsula la lógica para obtener información del usuario.
+ * Es idéntico a otros servicios de usuario, ideal para refactorizar en un módulo común.
+ */
 class ServicioUsuario {
+  /**
+   * Obtiene la información del perfil de un usuario de Slack por su ID.
+   * @param {string} userId - El ID del usuario en Slack.
+   * @returns {Promise<Object>} El objeto `user` de Slack.
+   */
   static async obtenerInformacionUsuario(userId) {
     try {
       const respuesta = await slackClient.users.info({ user: userId });
@@ -15,6 +28,11 @@ class ServicioUsuario {
     }
   }
 
+  /**
+   * Obtiene datos del empleado desde la base de datos usando su email.
+   * @param {string} email - El email del usuario.
+   * @returns {Promise<Object>} Un objeto con `funCod` y `tipoDescanso`.
+   */
   static async obtenerDatosEmpleado(email) {
     await poolConnect;
     const resultado = await pool.request()
@@ -40,6 +58,11 @@ class ServicioUsuario {
   }
 }
 
+/**
+ * @class ServicioFechas
+ * @description Agrupa métodos para la manipulación de fechas.
+ * Idéntico a otros servicios de fechas, candidato a ser un módulo reutilizable.
+ */
 class ServicioFechas {
   static obtenerFestivosColombia(año) {
     return [
@@ -65,42 +88,24 @@ class ServicioFechas {
   }
 
   static esSabadoDescanso(fecha, tipoDescanso) {
-    // No procesar si no es sábado.
     if (getDay(fecha) !== 6) return false;
-
-    // Se obtiene el número de la semana del año. 
-    // { weekStartsOn: 1 } asegura que la semana empiece en Lunes, para consistencia.
     const semanaDelAño = getWeek(fecha, { weekStartsOn: 1 });
-    
-    // El tipo 1 descansa en semanas IMPARES del año.
-    // El tipo 2 descansa en semanas PARES del año.
-    // Este método es robusto y no se "invierte" entre meses.
-    return (tipoDescanso === 1 && semanaDelAño % 2 === 1) || (tipoDescanso === 2 && semanaDelAño % 2 === 0);
+    return (tipoDescanso === 1 && semanaDelAño % 2 !== 0) || (tipoDescanso === 2 && semanaDelAño % 2 === 0);
   }
 
   static agruparPorSemanas(dias) {
-    if (dias.length === 0) {
-      return [];
-    }
+    if (dias.length === 0) return [];
     
-    // Un Map para agrupar los días. La clave será el string de la fecha de inicio de semana.
     const semanasAgrupadas = new Map();
-
     dias.forEach(dia => {
-      // Obtenemos el Lunes de la semana a la que pertenece el día. { weekStartsOn: 1 } define Lunes como inicio.
       const inicioDeSemana = startOfWeek(dia.fechaObj, { weekStartsOn: 1 });
       const inicioDeSemanaStr = format(inicioDeSemana, 'yyyy-MM-dd');
-
-      // Si no tenemos una entrada para esta semana, la creamos.
       if (!semanasAgrupadas.has(inicioDeSemanaStr)) {
         semanasAgrupadas.set(inicioDeSemanaStr, []);
       }
-      
-      // Añadimos el día al array de su semana correspondiente.
       semanasAgrupadas.get(inicioDeSemanaStr).push(dia);
     });
 
-    // Convertimos el Map en un array de semanas y lo ordenamos para asegurar el orden cronológico.
     const semanasOrdenadas = Array.from(semanasAgrupadas.values()).sort((semanaA, semanaB) => {
         return semanaA[0].fechaObj - semanaB[0].fechaObj;
     });
@@ -108,6 +113,11 @@ class ServicioFechas {
   }
 }
 
+/**
+ * @class ServicioReporteTiempo
+ * @description Contiene la lógica para consultar y calcular los tiempos registrados.
+ * Idéntico a otros servicios de reporte, ideal para refactorizar.
+ */
 class ServicioReporteTiempo {
   static async obtenerReporteDiario(funCod, fecha) {
     const fechaStr = format(fecha, 'yyyy-MM-dd');
@@ -131,11 +141,7 @@ class ServicioReporteTiempo {
       `);
 
     const { TotalHoras, TotalMinutos } = resultado.recordset[0];
-    let horasRegistradas = 0;
-    let minutosRegistrados = 0;
-    let mensaje = '';
-    let cumpleRequerimiento = false;
-    let faltante = '';
+    let horasRegistradas = 0, minutosRegistrados = 0, mensaje = '', cumpleRequerimiento = false, faltante = '';
 
     if (TotalHoras !== null && TotalMinutos !== null) {
       horasRegistradas = TotalHoras + Math.floor(TotalMinutos / 60);
@@ -159,13 +165,9 @@ class ServicioReporteTiempo {
     }
 
     return {
-      fecha: format(fecha, 'dd/MM/yyyy'),
-      fechaObj: fecha,
-      mensaje: mensaje,
-      horas: horasRegistradas,
-      minutos: minutosRegistrados,
-      cumpleRequerimiento: cumpleRequerimiento,
-      esSabado: esSabado
+      fecha: format(fecha, 'dd/MM/yyyy'), fechaObj: fecha,
+      mensaje: mensaje, horas: horasRegistradas, minutos: minutosRegistrados,
+      cumpleRequerimiento: cumpleRequerimiento, esSabado: esSabado
     };
   }
 
@@ -178,12 +180,7 @@ class ServicioReporteTiempo {
     const diasLaborales = diasSemana.filter(dia => !dia.esSabado).length;
     const sabadosLaborables = diasSemana.filter(dia => dia.esSabado).length;
     
-    // Convertir horas requeridas a formato hh:mm (8.5 horas = 8:30)
-    const horasRequeridasLaborales = diasLaborales * 8.5;
-    const horasRequeridasSabados = sabadosLaborables * 3;
-    const totalHorasRequeridas = horasRequeridasLaborales + horasRequeridasSabados;
-    
-    // Separar en horas y minutos
+    const totalHorasRequeridas = (diasLaborales * 8.5) + (sabadosLaborables * 3);
     const horasRequeridasEntero = Math.floor(totalHorasRequeridas);
     const minutosRequeridos = Math.round((totalHorasRequeridas - horasRequeridasEntero) * 60);
     
@@ -191,225 +188,116 @@ class ServicioReporteTiempo {
     const cumpleRequerimiento = totalHorasDecimal >= totalHorasRequeridas;
 
     return {
-      totalHoras: horasFormateadas,
-      totalMinutos: minutosFormateados,
+      totalHoras: horasFormateadas, totalMinutos: minutosFormateados,
       horasRequeridas: `${horasRequeridasEntero}h ${minutosRequeridos.toString().padStart(2, '0')}m`,
       cumpleRequerimiento
     };
   }
 
   static calcularResumenMensual(diasReporte, sabadosExcluidos, festivosExcluidos) {
-    const { totalHoras, totalMinutos, horasRequeridas, cumpleRequerimiento } = 
-      this.calcularResumenSemanal(diasReporte);
-    
-    return {
-      totalHoras,
-      totalMinutos,
-      horasRequeridas,
-      cumpleRequerimiento,
-      sabadosExcluidos,
-      festivosExcluidos
-    };
+    const resumen = this.calcularResumenSemanal(diasReporte);
+    return { ...resumen, sabadosExcluidos, festivosExcluidos };
   }
 }
 
+/**
+ * @class ConstructorMensajesSlack
+ * @description Se encarga de crear los bloques de mensajes de Slack para el reporte del mes anterior.
+ */
 class ConstructorMensajesSlack {
   static construirMensajeInicial(nombreUsuario, funCod, tipoDescanso, fechaInicio, fechaFin, sabadosExcluidos, festivosExcluidos) {
     return [
-      {
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: `📅 Reporte Mensual Anterior - ${format(fechaInicio, 'MMMM yyyy')}`
-        }
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Usuario:* ${nombreUsuario} (${funCod})\n*Tipo Descanso:* ${tipoDescanso}\n*Período:* ${format(fechaInicio, 'dd/MM/yyyy')} - ${format(fechaFin, 'dd/MM/yyyy')}\n*Sábados excluidos:* ${sabadosExcluidos}\n*Festivos excluidos:* ${festivosExcluidos}`
-        }
-      },
-      {
-        type: 'divider'
-      }
+      { type: 'header', text: { type: 'plain_text', text: `📅 Reporte Mensual Anterior - ${format(fechaInicio, 'MMMM yyyy')}` } },
+      { type: 'section', text: { type: 'mrkdwn', text: `*Usuario:* ${nombreUsuario} (${funCod})\n*Tipo Descanso:* ${tipoDescanso}\n*Período:* ${format(fechaInicio, 'dd/MM/yyyy')} - ${format(fechaFin, 'dd/MM/yyyy')}\n*Sábados excluidos:* ${sabadosExcluidos}\n*Festivos excluidos:* ${festivosExcluidos}` } },
+      { type: 'divider' }
     ];
   }
 
   static construirMensajeSemanal(numeroSemana, diasSemana, fechaInicio, fechaFin, esUltimaSemana = false) {
-    const { totalHoras, totalMinutos, horasRequeridas, cumpleRequerimiento } = 
-      ServicioReporteTiempo.calcularResumenSemanal(diasSemana);
+    const resumenSemana = ServicioReporteTiempo.calcularResumenSemanal(diasSemana);
     
     const bloquesSemana = [
-      {
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: `📆 Semana ${numeroSemana} (${format(fechaInicio, 'dd/MM')} - ${format(fechaFin, 'dd/MM')})`
-        }
-      }
+      { type: 'header', text: { type: 'plain_text', text: `📆 Semana ${numeroSemana} (${format(fechaInicio, 'dd/MM')} - ${format(fechaFin, 'dd/MM')})` } }
     ];
 
-    // Días laborales (L-V)
     const diasLaborales = diasSemana.filter(dia => !dia.esSabado);
     if (diasLaborales.length > 0) {
-      bloquesSemana.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*📝 Días laborales (L-V) - Requerido: 8h 30m*'
-        }
-      });
-
+      bloquesSemana.push({ type: 'section', text: { type: 'mrkdwn', text: '*📝 Días laborales (L-V) - Requerido: 8h 30m*' } });
       for (let i = 0; i < diasLaborales.length; i += 2) {
-        const campos = diasLaborales.slice(i, i + 2).map(dia => ({
-          type: 'mrkdwn',
-          text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}`
-        }));
-        
-        while (campos.length < 2) {
-          campos.push({
-            type: 'mrkdwn',
-            text: ' '
-          });
-        }
-
-        bloquesSemana.push({
-          type: 'section',
-          fields: campos
-        });
+        const campos = diasLaborales.slice(i, i + 2).map(dia => ({ type: 'mrkdwn', text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}` }));
+        while (campos.length < 2) campos.push({ type: 'mrkdwn', text: ' ' });
+        bloquesSemana.push({ type: 'section', fields: campos });
       }
     }
 
-    // Sábados laborables
     const sabados = diasSemana.filter(dia => dia.esSabado);
     if (sabados.length > 0) {
-      bloquesSemana.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*🛠️ Sábados laborables - Requerido: 3h*'
-        }
-      });
-
+      bloquesSemana.push({ type: 'section', text: { type: 'mrkdwn', text: '*🛠️ Sábados laborables - Requerido: 3h*' } });
       sabados.forEach(dia => {
-        bloquesSemana.push({
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}`
-          }
-        });
+        bloquesSemana.push({ type: 'section', text: { type: 'mrkdwn', text: `${dia.cumpleRequerimiento ? '✅' : '⚠️'} *${dia.fecha}*\n${dia.mensaje}` } });
       });
     }
 
-    // Resumen semanal - Solo si no es la última semana
     if (!esUltimaSemana) {
       bloquesSemana.push({
         type: 'context',
-        elements: [{
-          type: 'mrkdwn',
-          text: `*📊 Total semana ${numeroSemana}:* ${totalHoras}h ${totalMinutos.toString().padStart(2, '0')}m (Requerido: ${horasRequeridas}) ${cumpleRequerimiento ? '✅' : '⚠️'}`
-        }]
+        elements: [{ type: 'mrkdwn', text: `*📊 Total semana ${numeroSemana}:* ${resumenSemana.totalHoras}h ${resumenSemana.totalMinutos.toString().padStart(2, '0')}m (Requerido: ${resumenSemana.horasRequeridas}) ${resumenSemana.cumpleRequerimiento ? '✅' : '⚠️'}` }]
       });
     }
 
-    bloquesSemana.push({
-      type: 'divider'
-    });
-
+    bloquesSemana.push({ type: 'divider' });
     return bloquesSemana;
   }
 
   static construirResumenMensual(resumenMensual) {
     return [
-      {
-        type: 'header',
-        text: {
-          type: 'plain_text',
-          text: '📊 Resumen Mensual Anterior'
-        }
-      },
-      {
-        type: 'section',
-        fields: [
-          {
-            type: 'mrkdwn',
-            text: `*Total registrado:* ${resumenMensual.totalHoras}h ${resumenMensual.totalMinutos.toString().padStart(2, '0')}m`
-          },
-          {
-            type: 'mrkdwn',
-            text: `*Requerido:* ${resumenMensual.horasRequeridas}`
-          }
-        ]
-      },
-      {
-        type: 'section',
-        fields: [
-          {
-            type: 'mrkdwn',
-            text: `*Estado:* ${resumenMensual.cumpleRequerimiento ? '✅ Cumple' : '⚠️ No cumple'}`
-          }
-        ]
-      },
-      {
-        type: 'section',
-        fields: [
-          {
-            type: 'mrkdwn',
-            text: `*Sábados excluidos:* ${resumenMensual.sabadosExcluidos}`
-          },
-          {
-            type: 'mrkdwn',
-            text: `*Festivos excluidos:* ${resumenMensual.festivosExcluidos}`
-          }
-        ]
-      }
+      { type: 'header', text: { type: 'plain_text', text: '📊 Resumen Mensual Anterior' } },
+      { type: 'section', fields: [
+          { type: 'mrkdwn', text: `*Total registrado:* ${resumenMensual.totalHoras}h ${resumenMensual.totalMinutos.toString().padStart(2, '0')}m` },
+          { type: 'mrkdwn', text: `*Requerido:* ${resumenMensual.horasRequeridas}` }
+      ]},
+      { type: 'section', fields: [{ type: 'mrkdwn', text: `*Estado:* ${resumenMensual.cumpleRequerimiento ? '✅ Cumple' : '⚠️ No cumple'}` }] },
+      { type: 'section', fields: [
+          { type: 'mrkdwn', text: `*Sábados excluidos:* ${resumenMensual.sabadosExcluidos}` },
+          { type: 'mrkdwn', text: `*Festivos excluidos:* ${resumenMensual.festivosExcluidos}` }
+      ]}
     ];
   }
 
   static construirMensajeError(error) {
     return [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '❌ *Error al generar el reporte mensual anterior*'
-        }
-      },
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Detalles:*\n${error.message}`
-        }
-      }
+      { type: 'section', text: { type: 'mrkdwn', text: '❌ *Error al generar el reporte mensual anterior*' } },
+      { type: 'section', text: { type: 'mrkdwn', text: `*Detalles:*\n${error.message}` } }
     ];
   }
 }
 
+/**
+ * @class ComandoReporteMensualPast
+ * @description Orquesta la lógica para el comando `crm-check-me-past`.
+ * Genera un reporte personal del mes anterior completo.
+ */
 class ComandoReporteMensualPast {
   async execute(comando, say) {
     try {
+      // 1. Obtener el ID del usuario que ejecutó el comando.
       const userId = comando.user_id;
 
-      // 1. Obtener información del usuario
+      // 2. Obtener información del usuario de Slack.
       const informacionUsuario = await ServicioUsuario.obtenerInformacionUsuario(userId);
       const nombreUsuario = informacionUsuario.real_name || 'Usuario';
       const emailUsuario = informacionUsuario.name || 'usuario_desconocido';
 
-      // 2. Obtener datos del empleado
+      // 3. Obtener datos del empleado de la BD.
       const { funCod, tipoDescanso } = await ServicioUsuario.obtenerDatosEmpleado(emailUsuario);
 
-      // 3. Configurar fechas del reporte (mes anterior completo)
+      // 4. Configurar el rango de fechas para el mes anterior completo.
       const hoy = new Date();
       const primerDiaMesAnterior = subMonths(new Date(hoy.getFullYear(), hoy.getMonth(), 1), 1);
       const ultimoDiaMesAnterior = lastDayOfMonth(primerDiaMesAnterior);
 
-      // 4. Obtener días festivos del año del mes anterior
+      // 5. Obtener festivos y calcular días laborables.
       const festivos = ServicioFechas.obtenerFestivosColombia(primerDiaMesAnterior.getFullYear());
-
-      // 5. Obtener todos los días laborables del mes anterior
       const diasLaborables = ServicioFechas.obtenerDiasLaborables(
         primerDiaMesAnterior, 
         ultimoDiaMesAnterior, 
@@ -417,54 +305,31 @@ class ComandoReporteMensualPast {
         festivos
       );
 
-      // 6. Contar días excluidos del mes anterior
-      const sabadosExcluidos = eachDayOfInterval({
-        start: primerDiaMesAnterior,
-        end: ultimoDiaMesAnterior
-      }).filter(dia => 
-        getDay(dia) === 6 && ServicioFechas.esSabadoDescanso(dia, tipoDescanso)
-      ).length;
-
+      // 6. Contar días no laborables para el resumen.
+      const sabadosExcluidos = eachDayOfInterval({ start: primerDiaMesAnterior, end: ultimoDiaMesAnterior }).filter(dia => getDay(dia) === 6 && ServicioFechas.esSabadoDescanso(dia, tipoDescanso)).length;
       const festivosExcluidos = festivos.filter(f => {
         const fechaFestivo = new Date(f);
         return fechaFestivo >= primerDiaMesAnterior && fechaFestivo <= ultimoDiaMesAnterior;
       }).length;
 
-      // 7. Generar reporte diario para todo el mes anterior
+      // 7. Generar reporte diario para cada día laborable del mes anterior.
       const reportesDiarios = [];
       for (const dia of diasLaborables) {
         const reporte = await ServicioReporteTiempo.obtenerReporteDiario(funCod, dia);
         reportesDiarios.push(reporte);
       }
 
-      // 8. Enviar mensaje inicial
+      // 8. Enviar mensaje inicial.
       await say({
         text: `Iniciando reporte mensual anterior para ${nombreUsuario}`,
-        blocks: ConstructorMensajesSlack.construirMensajeInicial(
-          nombreUsuario, 
-          funCod, 
-          tipoDescanso, 
-          primerDiaMesAnterior, 
-          ultimoDiaMesAnterior,
-          sabadosExcluidos,
-          festivosExcluidos
-        )
+        blocks: ConstructorMensajesSlack.construirMensajeInicial(nombreUsuario, funCod, tipoDescanso, primerDiaMesAnterior, ultimoDiaMesAnterior, sabadosExcluidos, festivosExcluidos)
       });
 
-      // 9. Dividir en semanas y enviar reportes
+      // 9. Agrupar por semanas y enviar reporte de cada una.
       const semanas = ServicioFechas.agruparPorSemanas(reportesDiarios);
       
       if (semanas.length === 0) {
-        await say({
-          text: 'No hay días laborables en el mes anterior',
-          blocks: [{
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '*ℹ️ No hay días laborables en el mes anterior*'
-            }
-          }]
-        });
+        await say({ text: 'No hay días laborables en el mes anterior', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '*ℹ️ No hay días laborables en el mes anterior*' } }] });
         return;
       }
       
@@ -476,23 +341,12 @@ class ComandoReporteMensualPast {
 
         await say({
           text: `Reporte semana ${numeroSemana} del mes anterior para ${nombreUsuario}`,
-          blocks: ConstructorMensajesSlack.construirMensajeSemanal(
-            numeroSemana, 
-            semana, 
-            primeraFecha, 
-            ultimaFecha,
-            esUltimaSemana
-          )
+          blocks: ConstructorMensajesSlack.construirMensajeSemanal(numeroSemana, semana, primeraFecha, ultimaFecha, esUltimaSemana)
         });
       }
 
-      // 10. Enviar resumen mensual anterior
-      const resumenMensual = ServicioReporteTiempo.calcularResumenMensual(
-        reportesDiarios, 
-        sabadosExcluidos, 
-        festivosExcluidos
-      );
-
+      // 10. Calcular y enviar resumen final del mes anterior.
+      const resumenMensual = ServicioReporteTiempo.calcularResumenMensual(reportesDiarios, sabadosExcluidos, festivosExcluidos);
       await say({
         text: `Resumen mensual anterior para ${nombreUsuario}`,
         blocks: ConstructorMensajesSlack.construirResumenMensual(resumenMensual)
@@ -508,4 +362,5 @@ class ComandoReporteMensualPast {
   }
 }
 
+// Exportar la clase principal del comando.
 module.exports = ComandoReporteMensualPast;

@@ -1,18 +1,21 @@
-const { pool, poolConnect } = require('../../db/conection.js');
-const { WebClient } = require('@slack/web-api');
-const sql = require('mssql');
+// Importar dependencias necesarias.
+const { pool, poolConnect } = require('../../db/conection.js'); // Conexión a la base de datos.
+const { WebClient } = require('@slack/web-api'); // Cliente de la API de Slack.
+const sql = require('mssql'); // Driver de SQL Server.
 
+// Inicializar el cliente de la API de Slack con el token del bot.
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 /**
- * 🛠️ SERVICIO SLACK ACTUALIZADO
- * Ahora busca por nombre de usuario en lugar de email.
+ * @class ServicioSlack
+ * @description Encapsula la lógica para interactuar con la API de Slack,
+ * específicamente para la gestión de usuarios.
  */
 class ServicioSlack {
     /**
-     * Busca un usuario en Slack por su nombre de usuario (ej. 'lvillamizarmurillo').
-     * @param {string} username - El nombre de usuario a buscar.
-     * @returns {Promise<string|null>} El ID del usuario de Slack (ej: 'U123ABC456') o null si no se encuentra.
+     * Busca el ID de un usuario en Slack a partir de su nombre de usuario (username).
+     * @param {string} username - El nombre de usuario a buscar (ej. 'lvillamizarmurillo').
+     * @returns {Promise<string|null>} El ID del usuario de Slack (ej. 'U123ABC456') o `null` si no se encuentra.
      */
     static async obtenerIdUsuarioPorUsername(username) {
         if (!username) {
@@ -20,18 +23,18 @@ class ServicioSlack {
             return null;
         }
         try {
-            // 1. Obtenemos la lista de TODOS los usuarios del workspace.
-            // Slack no tiene un método directo para buscar por username, esta es la forma estándar.
+            // 1. Obtener la lista completa de usuarios del workspace.
+            // Slack no ofrece un endpoint directo para buscar por `username`, por lo que este es el método estándar.
             const respuesta = await slackClient.users.list();
             
             if (respuesta.ok && respuesta.members) {
-                // 2. Buscamos en la lista el miembro cuyo 'name' coincida.
+                // 2. Buscar en la lista de miembros el que coincida con el `username` (insensible a mayúsculas).
                 const usuarioEncontrado = respuesta.members.find(
                     miembro => miembro.name === username.toLowerCase()
                 );
 
                 if (usuarioEncontrado) {
-                    // 3. Si lo encontramos, devolvemos su ID.
+                    // 3. Si se encuentra, devolver su ID.
                     return usuarioEncontrado.id;
                 }
             }
@@ -46,9 +49,16 @@ class ServicioSlack {
 }
 
 /**
- * Servicio para gestionar la lógica de base de datos (SIN CAMBIOS).
+ * @class ServicioNotificaciones
+ * @description Contiene la lógica para realizar consultas a la base de datos
+ * relacionadas con las tareas y los funcionarios.
  */
 class ServicioNotificaciones {
+    /**
+     * Obtiene los detalles de una tarea específica por su ID.
+     * @param {number} tarSec - El ID secuencial de la tarea.
+     * @returns {Promise<Object|null>} Un objeto con los datos de la tarea o `null` si no se encuentra.
+     */
     static async obtenerTareaPorId(tarSec) {
         await poolConnect;
         try {
@@ -66,7 +76,12 @@ class ServicioNotificaciones {
         }
     }
 
-    static async obtenerUsernameDeFuncionario(funCod) { // Cambiado nombre para claridad
+    /**
+     * Obtiene el `username` de Slack (almacenado en `FunDirEmail`) de un funcionario a partir de su código.
+     * @param {string} funCod - El código del funcionario.
+     * @returns {Promise<string|null>} El `username` del funcionario o `null` si no se encuentra.
+     */
+    static async obtenerUsernameDeFuncionario(funCod) {
         if (!funCod) return null;
         await poolConnect;
         try {
@@ -80,6 +95,11 @@ class ServicioNotificaciones {
         }
     }
 
+    /**
+     * Obtiene el nombre completo de un funcionario a partir de su código.
+     * @param {string} funCod - El código del funcionario.
+     * @returns {Promise<string>} El nombre del funcionario o 'Un usuario' si no se encuentra.
+     */
     static async obtenerNombreDeFuncionario(funCod) {
         if (!funCod) return 'Un usuario';
         await poolConnect;
@@ -95,12 +115,20 @@ class ServicioNotificaciones {
     }
 }
 
-
 /**
- * Orquesta la notificación de UNA tarea específica (LÓGICA ACTUALIZADA).
+ * @class NotifyTasksFunction
+ * @description Clase principal que orquesta la lógica de notificación.
+ * Es invocada desde el endpoint de `botCore.js` cuando GeneXus realiza una llamada.
  */
 class NotifyTasksFunction {
+    /**
+     * Ejecuta el proceso de notificación.
+     * @param {string} vaDirigidoA - Define el tipo de notificación ('NotificarAsignado' o 'NotificarCreador').
+     * @param {number} tarSec - El ID de la tarea a notificar.
+     * @returns {Promise<string>} Un mensaje indicando el resultado de la operación.
+     */
     async execute(vaDirigidoA, tarSec) {
+        // 1. Obtener la información de la tarea.
         const tarea = await ServicioNotificaciones.obtenerTareaPorId(tarSec);
         if (!tarea) {
             throw new Error(`La tarea con ID ${tarSec} no existe.`);
@@ -109,12 +137,15 @@ class NotifyTasksFunction {
         let targetFunCod = null;
         let mensaje = "";
 
+        // 2. Determinar el destinatario y el contenido del mensaje según el tipo de notificación.
         if (vaDirigidoA === 'NotificarAsignado') {
-            targetFunCod = tarea.SubFunCodTar;
+            // Notificación para el usuario a quien se le asignó la tarea.
+            targetFunCod = tarea.SubFunCodTar; // El destinatario es el funcionario asignado.
             const nombreCreador = await ServicioNotificaciones.obtenerNombreDeFuncionario(tarea.FunCod);
             mensaje = `👋 ¡Hola! *${nombreCreador}* te asignó la tarea con ID *${tarSec}*. Por favor, revísala en el sistema.`;
         } else if (vaDirigidoA === 'NotificarCreador') {
-            targetFunCod = tarea.FunCod;
+            // Notificación para el usuario que creó la tarea.
+            targetFunCod = tarea.FunCod; // El destinatario es el funcionario creador.
             const nombreAsignado = await ServicioNotificaciones.obtenerNombreDeFuncionario(tarea.SubFunCodTar);
             mensaje = `👍 ¡Buenas noticias! *${nombreAsignado}* finalizó la tarea con ID *${tarSec}*. Ya puedes verificarla.`;
         } else {
@@ -125,24 +156,24 @@ class NotifyTasksFunction {
             return `La tarea ${tarSec} no tiene un destinatario válido para la acción '${vaDirigidoA}'.`;
         }
         
-        // CAMBIO 1: Obtenemos el username de la BD. Le cambié el nombre a la función y variable para que sea más claro.
+        // 3. Obtener el `username` de Slack del funcionario destinatario desde la base de datos.
         const usernameSlack = await ServicioNotificaciones.obtenerUsernameDeFuncionario(targetFunCod);
         if (!usernameSlack) {
             console.warn(`⚠️ No se encontró un username de Slack en la BD para el funcionario ${targetFunCod}.`);
             return `No se encontró el username de Slack para el funcionario ${targetFunCod}.`;
         }
 
-        // CAMBIO 2: Usamos el nuevo método para buscar por username.
+        // 4. Usar el `username` para encontrar el ID de usuario de Slack.
         const slackUserId = await ServicioSlack.obtenerIdUsuarioPorUsername(usernameSlack);
         if (!slackUserId) {
             console.warn(`⚠️ No se encontró un usuario en Slack con el username ${usernameSlack} (del Funcionario: ${targetFunCod}).`);
             return `No se encontró el usuario de Slack correspondiente al funcionario ${targetFunCod}.`;
         }
         
-        // CAMBIO 3: El envío del mensaje ahora funcionará porque `slackUserId` es el ID correcto.
+        // 5. Enviar el mensaje directo al ID de usuario de Slack encontrado.
         try {
             await slackClient.chat.postMessage({
-                channel: slackUserId,
+                channel: slackUserId, // El ID del canal de DM es el mismo que el ID de usuario.
                 text: mensaje
             });
         } catch(err) {
@@ -154,4 +185,5 @@ class NotifyTasksFunction {
     }
 }
 
+// Exportar la clase para que pueda ser instanciada en `botCore.js`.
 module.exports = NotifyTasksFunction;
