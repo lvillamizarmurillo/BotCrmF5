@@ -5,7 +5,7 @@ const { format, subDays, eachDayOfInterval, getDay, isSunday, startOfWeek, getWe
 const slackClient = new WebClient(process.env.SLACK_BOT_TOKEN);
 
 // Lista de funcionarios autorizados para ejecutar este comando
-const FUNCIONARIOS_AUTORIZADOS = ['LUDWINGV', 'KARLAC', '10', '11', '8'];
+const FUNCIONARIOS_AUTORIZADOS = ['KARLAC', '10', '11', '8'];
 
 /**
  * Servicio para manejar operaciones relacionadas con usuarios
@@ -80,7 +80,7 @@ class ServicioFechas {
     return [
       `${año}-01-01`, `${año}-01-06`, `${año}-03-19`, `${año}-05-01`,
       `${año}-06-29`, `${año}-07-20`, `${año}-08-07`, `${año}-08-18`,
-      `${año}-10-13`, `${año}-11-01`, `${año}-11-11`, `${año}-12-08`,
+      `${año}-10-13`, `${año}-11-03`, `${año}-11-17`, `${año}-12-08`,
       `${año}-12-25`
     ];
   }

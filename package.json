@@ -21,7 +21,6 @@
     "mssql": "^11.0.1"
   },
   "devDependencies": {
-    "ngrok": "^5.0.0-beta.2",
     "nodemon": "^3.1.10"
   }
 }
